@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Idea Giardino - Monitoraggio Concorrenza</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        h1 {
+            text-align: center;
+        }
+        .form-container {
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+        }
+        .form-group {
+            flex: 1;
+            margin: 10px;
+            min-width: 200px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+        .form-group input[type="text"] {
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 15px;
+            border: none;
+            background-color: #28a745;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #218838;
+        }
+        #product-count {
+            text-align: right;
+            margin-bottom: 20px;
+        }
+        .competitor-list {
+            margin-top: 20px;
+        }
+        .competitor-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .competitor-item button {
+            background-color: #dc3545;
+        }
+        .competitor-item button:hover {
+            background-color: #c82333;
+        }
+        .price-comparison {
+            font-weight: bold;
+        }
+        .price-comparison.lower {
+            color: green;
+        }
+        .price-comparison.higher {
+            color: red;
+        }
+        .price-comparison.equal {
+            color: blue;
+        }
+    </style>
+</head>
+<body>
+    <h1>Monitoraggio Concorrenza</h1>
+    <div id="message" style="color: red; font-weight: bold;"></div>
+    <div id="product-count"></div>
+    <form id="competitorForm">
+        <div class="form-container">
+            <div class="form-group">
+                <label for="url">URL Concorrente:</label>
+                <input type="text" id="url" name="url" required>
+            </div>
+            <div class="form-group">
+                <label for="vendor">Vendor:</label>
+                <select id="vendor" name="vendor"></select>
+            </div>
+            <div class="form-group">
+                <label for="product_id">Prodotto Shopify:</label>
+                <input type="text" id="productSearch" placeholder="Cerca prodotto...">
+                <select id="product_id" name="product_id" size="5"></select>
+            </div>
+            <div class="form-group">
+                <label for="price_selector">Selettore Prezzo:</label>
+                <input type="text" id="price_selector" name="price_selector" required>
+            </div>
+            <div class="form-group">
+                <label for="competitor_price">Prezzo Concorrente:</label>
+                <input type="text" id="competitor_price" name="competitor_price" readonly>
+            </div>
+        </div>
+        <button type="submit">Aggiungi Concorrente</button>
+    </form>
+
+    <div class="competitor-list" id="competitorList"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            let competitors = [];
+
+            fetch('/get-shopify-products')
+            .then(response => response.json())
+            .then(data => {
+                const productSelect = document.getElementById('product_id');
+                data.products.forEach(product => {
+                    const option = document.createElement('option');
+                    option.value = product.id;
+                    option.textContent = product.title + " (" + product.variants[0].sku + ")";
+                    productSelect.appendChild(option);
+                });
+                document.getElementById('product-count').textContent = `Totale Prodotti: ${data.total}`;
+
+                document.getElementById('productSearch').addEventListener('input', function() {
+                    const searchValue = this.value.toLowerCase();
+                    const options = productSelect.options;
+                    for (let i = 0; i < options.length; i++) {
+                        const option = options[i];
+                        if (option.textContent.toLowerCase().includes(searchValue)) {
+                            option.style.display = 'block';
+                        } else {
+                            option.style.display = 'none';
+                        }
+                    }
+                });
+            });
+
+            fetch('/get-shopify-vendors')
+            .then(response => response.json())
+            .then(data => {
+                const vendorSelect = document.getElementById('vendor');
+                data.forEach(vendor => {
+                    const option = document.createElement('option');
+                    option.value = vendor;
+                    option.textContent = vendor;
+                    vendorSelect.appendChild(option);
+                });
+            });
+
+            document.getElementById('vendor').addEventListener('change', function() {
+                const vendor = this.value;
+                fetch(`/get-products-by-vendor?vendor=${vendor}`)
+                .then(response => response.json())
+                .then(data => {
+                    const productSelect = document.getElementById('product_id');
+                    productSelect.innerHTML = '';
+                    data.forEach(product => {
+                        const option = document.createElement('option');
+                        option.value = product.id;
+                        option.textContent = product.title + " (" + product.variants[0].sku + ")";
+                        productSelect.appendChild(option);
+                    });
+                });
+            });
+
+            document.getElementById('url').addEventListener('blur', function() {
+                const url = this.value;
+                const priceSelector = document.getElementById('price_selector').value;
+                if (url && priceSelector) {
+                    fetch('/scrape-price', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ url, price_selector: priceSelector })
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            return response.json().then(data => { throw new Error(data.message); });
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.status === 'success') {
+                            document.getElementById('competitor_price').value = data.price;
+                        } else {
+                            alert(data.message);
+                        }
+                    })
+                    .catch(error => {
+                        alert('Errore nella richiesta: ' + error.message);
+                    });
+                }
+            });
+
+            document.getElementById('competitorForm').addEventListener('submit', function(event) {
+                event.preventDefault();
+                const formData = new FormData(event.target);
+                fetch('/add-competitor', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    const messageElement = document.getElementById('message');
+                    if (data.status === 'success') {
+                        messageElement.style.color = 'green';
+                        messageElement.textContent = 'Concorrente aggiunto con successo';
+                        competitors.push(data.competitor);
+                        updateCompetitorList();
+                    } else {
+                        messageElement.style.color = 'red';
+                        messageElement.textContent = 'Errore: ' + data.message;
+                    }
+                })
+                .catch(error => {
+                    const messageElement = document.getElementById('message');
+                    messageElement.style.color = 'red';
+                    messageElement.textContent = 'Errore nella richiesta: ' + error.message;
+                });
+            });
+
+            fetch('/get-competitors')
+            .then(response => response.json())
+            .then(data => {
+                competitors = data;
+                updateCompetitorList();
+            });
+
+            function updateCompetitorList() {
+                const competitorList = document.getElementById('competitorList');
+                competitorList.innerHTML = '';
+                competitors.forEach((competitor, index) => {
+                    const shopifyPrice = parseFloat(competitor.shopify_product.variants[0].price.replace(',', '.'));
+                    const competitorPrice = parseFloat(competitor.competitor_price.replace(',', '.'));
+                    let priceComparisonText = '';
+                    let priceComparisonClass = '';
+
+                    if (shopifyPrice < competitorPrice) {
+                        const percentage = ((competitorPrice - shopifyPrice) / competitorPrice * 100).toFixed(2);
+                        priceComparisonText = `Prezzo inferiore del ${percentage}% (€${(competitorPrice - shopifyPrice).toFixed(2)})`;
+                        priceComparisonClass = 'lower';
+                    } else if (shopifyPrice > competitorPrice) {
+                        const percentage = ((shopifyPrice - competitorPrice) / competitorPrice * 100).toFixed(2);
+                        priceComparisonText = `Prezzo superiore del ${percentage}% (€${(shopifyPrice - competitorPrice).toFixed(2)})`;
+                        priceComparisonClass = 'higher';
+                    } else {
+                        priceComparisonText = 'Prezzo uguale';
+                        priceComparisonClass = 'equal';
+                    }
+
+                    const competitorItem = document.createElement('div');
+                    competitorItem.className = 'competitor-item';
+                    competitorItem.innerHTML = `
+                        <div>
+                            <p><strong>URL Concorrente:</strong> ${competitor.url}</p>
+                            <p><strong>Prodotto Shopify:</strong> ${competitor.shopify_product.title}</p>
+                            <p><strong>Prezzo Concorrente:</strong> ${competitor.competitor_price}</p>
+                            <p><strong>Prezzo Shopify:</strong> ${competitor.shopify_product.variants[0].price}</p>
+                            <p><strong>Fornitore:</strong> ${competitor.shopify_product.vendor}</p>
+                            <p class="price-comparison ${priceComparisonClass}">${priceComparisonText}</p>
+                        </div>
+                        <button onclick="deleteCompetitor(${index})">Elimina</button>
+                    `;
+                    competitorList.appendChild(competitorItem);
+                });
+            }
+
+            window.deleteCompetitor = function(index) {
+                const formData = new FormData();
+                formData.append('index', index);
+
+                fetch('/delete-competitor', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        competitors.splice(index, 1);  // Rimuovi l'elemento dall'array
+                        updateCompetitorList();
+                    } else {
+                        alert(data.message);
+                    }
+                })
+                .catch(error => {
+                    alert('Errore nella richiesta: ' + error.message);
+                });
+            }
+        });
+    </script>
+</body>
+</html>
+
