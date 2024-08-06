@@ -279,7 +279,7 @@
 
             window.deleteCompetitor = function(index) {
                 const formData = new FormData();
-                formData.append('index', index);
+                formData.append('competitor_id', competitors[index].id);
 
                 fetch('/delete-competitor', {
                     method: 'POST',
@@ -302,4 +302,3 @@
     </script>
 </body>
 </html>
-
