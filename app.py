@@ -8,7 +8,7 @@ import os
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime
 from dotenv import load_dotenv
-import json  # Importa la libreria json
+import json
 
 app = Flask(__name__)
 
@@ -47,6 +47,10 @@ def add_competitor():
         if not price_selector:
             raise ValueError('Price selector not found')
 
+        # Check for duplicate URL
+        if Competitor.query.filter_by(url=url).first():
+            return jsonify({'status': 'error', 'message': 'Duplicate URL'}), 400
+
         # Scrape the competitor's price
         competitor_price = scrape_price(url, price_selector)
         app.logger.info(f"Scraped price: {competitor_price}")
@@ -56,13 +60,21 @@ def add_competitor():
 
         # Get the product details from Shopify
         shopify_product = get_shopify_product(product_id)
-        
+
         # Add the competitor to the database
         new_competitor = Competitor(url=url, product_id=product_id, vendor=vendor, price_selector=price_selector, competitor_price=competitor_price, shopify_product=json.dumps(shopify_product))
         db.session.add(new_competitor)
         db.session.commit()
 
-        return jsonify({'status': 'success', 'competitor': new_competitor.id})
+        return jsonify({'status': 'success', 'competitor': {
+            'id': new_competitor.id,
+            'url': new_competitor.url,
+            'product_id': new_competitor.product_id,
+            'vendor': new_competitor.vendor,
+            'price_selector': new_competitor.price_selector,
+            'competitor_price': new_competitor.competitor_price,
+            'shopify_product': json.loads(new_competitor.shopify_product)
+        }})
     except Exception as e:
         app.logger.error(f"Error in add_competitor: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -84,15 +96,17 @@ def delete_competitor():
 @app.route('/get-competitors', methods=['GET'])
 def get_competitors():
     competitors = Competitor.query.all()
-    return jsonify([{
+    competitors_data = [{
         'id': c.id,
         'url': c.url,
         'product_id': c.product_id,
         'vendor': c.vendor,
         'price_selector': c.price_selector,
         'competitor_price': c.competitor_price,
-        'shopify_product': json.loads(c.shopify_product)  # Convert JSON string back to dictionary
-    } for c in competitors])
+        'shopify_product': json.loads(c.shopify_product)
+    } for c in competitors]
+    app.logger.info(f"Competitors data: {competitors_data}")
+    return jsonify(competitors_data)
 
 @app.route('/scrape-price', methods=['POST'])
 def scrape_price_route():
@@ -198,8 +212,30 @@ def scrape_price(url, price_selector):
             price_match = re.search(r'\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?', raw_price_text)
             if price_match:
                 cleaned_price = price_match.group()
-                app.logger.info(f"Cleaned price: {cleaned_price}")
-                return cleaned_price
+
+                # Normalize the price format
+                if '.' in cleaned_price and ',' in cleaned_price:
+                    # Case where both '.' and ',' are present; assume ',' is decimal separator
+                    if cleaned_price.rfind(',') > cleaned_price.rfind('.'):
+                        cleaned_price = cleaned_price.replace('.', '').replace(',', '.')
+                    else:
+                        cleaned_price = cleaned_price.replace('.', '').replace(',', '.')
+                elif ',' in cleaned_price:
+                    # Case where only ',' is present, assume ',' is decimal separator
+                    cleaned_price = cleaned_price.replace('.', '').replace(',', '.')
+                elif '.' in cleaned_price:
+                    # Case where only '.' is present
+                    cleaned_price = cleaned_price.replace('.', '')
+
+                # Format price for European style (e.g., 1.421,00)
+                if '.' in cleaned_price:
+                    integer_part, decimal_part = cleaned_price.split('.')
+                    formatted_price = f"{integer_part[:-3]}.{integer_part[-3:]},{decimal_part[:2]}"
+                else:
+                    formatted_price = f"{cleaned_price[:-2]}.{cleaned_price[-2:]}"
+
+                app.logger.info(f"Formatted price: {formatted_price}")
+                return formatted_price
             else:
                 app.logger.error("Could not extract price from the text")
         else:
@@ -216,6 +252,15 @@ def get_shopify_product(product_id):
     response = requests.get(url, headers=headers)
     product = response.json().get('product', {})
     return product
+
+def get_cost_per_article(product_id):
+    url = f"https://{os.getenv('SHOPIFY_STORE_NAME')}.myshopify.com/admin/api/2023-07/variants/{product_id}.json"
+    headers = {
+        "X-Shopify-Access-Token": os.getenv('SHOPIFY_ACCESS_TOKEN')
+    }
+    response = requests.get(url, headers=headers)
+    variant = response.json().get('variant', {})
+    return variant.get('cost', 0.0)
 
 def update_competitor_prices():
     app.logger.info(f"Updating competitor prices at {datetime.now()}")

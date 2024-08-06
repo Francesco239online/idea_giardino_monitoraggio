@@ -235,6 +235,7 @@
             .then(response => response.json())
             .then(data => {
                 competitors = data;
+                console.log("Competitors data: ", competitors); // Log the data for debugging
                 updateCompetitorList();
             });
 
@@ -242,8 +243,10 @@
                 const competitorList = document.getElementById('competitorList');
                 competitorList.innerHTML = '';
                 competitors.forEach((competitor, index) => {
-                    const shopifyPrice = parseFloat(competitor.shopify_product.variants[0].price.replace(',', '.'));
-                    const competitorPrice = parseFloat(competitor.competitor_price.replace(',', '.'));
+                    console.log("Processing competitor: ", competitor); // Log the data for debugging
+                    const shopifyProduct = competitor.shopify_product;
+                    const shopifyPrice = parseFloat(shopifyProduct.variants[0].price.replace(',', '.'));
+                    const competitorPrice = parseFloat(competitor.competitor_price.replace('.', '').replace(',', '.'));
                     let priceComparisonText = '';
                     let priceComparisonClass = '';
 
@@ -265,10 +268,10 @@
                     competitorItem.innerHTML = `
                         <div>
                             <p><strong>URL Concorrente:</strong> ${competitor.url}</p>
-                            <p><strong>Prodotto Shopify:</strong> ${competitor.shopify_product.title}</p>
+                            <p><strong>Prodotto Shopify:</strong> ${shopifyProduct.title}</p>
                             <p><strong>Prezzo Concorrente:</strong> ${competitor.competitor_price}</p>
-                            <p><strong>Prezzo Shopify:</strong> ${competitor.shopify_product.variants[0].price}</p>
-                            <p><strong>Fornitore:</strong> ${competitor.shopify_product.vendor}</p>
+                            <p><strong>Prezzo Shopify:</strong> ${shopifyProduct.variants[0].price}</p>
+                            <p><strong>Fornitore:</strong> ${shopifyProduct.vendor}</p>
                             <p class="price-comparison ${priceComparisonClass}">${priceComparisonText}</p>
                         </div>
                         <button onclick="deleteCompetitor(${index})">Elimina</button>
@@ -288,7 +291,7 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.status === 'success') {
-                        competitors.splice(index, 1);  // Rimuovi l'elemento dall'array
+                        competitors.splice(index, 1);
                         updateCompetitorList();
                     } else {
                         alert(data.message);
