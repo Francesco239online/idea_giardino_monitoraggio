@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ricerca per concorrente</title>
+    <title>Statistiche aggiornamento prezzi</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -15,17 +15,17 @@
         .form-container {
             display: flex;
             justify-content: center;
+            margin-bottom: 20px;
         }
         .form-group {
             margin: 10px;
-            min-width: 200px;
         }
         .form-group label {
             display: block;
             margin-bottom: 5px;
         }
         .form-group input {
-            width: 100%;
+            width: 200px;
             padding: 8px;
             box-sizing: border-box;
         }
@@ -41,20 +41,30 @@
         button:hover {
             background-color: #218838;
         }
-        .competitor-details {
+        .stats {
             margin-top: 20px;
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
         }
-        .price-comparison.lower {
-            color: green;
+        .stats h2 {
+            text-align: center;
         }
-        .price-comparison.higher {
-            color: red;
+        .stats p {
+            font-size: 18px;
         }
-        .price-comparison.equal {
-            color: blue;
+        .vendor-stats {
+            margin-top: 20px;
+            border-top: 1px solid #ccc;
+            padding-top: 20px;
+        }
+        .vendor-stats h3 {
+            text-align: center;
+        }
+        .vendor-stats ul {
+            list-style: none;
+            padding: 0;
+        }
+        .vendor-stats li {
+            margin: 5px 0;
+            font-size: 18px;
         }
         .menu-icon {
             font-size: 30px;
@@ -101,48 +111,56 @@
         <a href="/price-update-stats">Statistiche aggiornamento prezzi</a>
     </div>
 
-    <h1>Ricerca per concorrente</h1>
+    <h1>Statistiche aggiornamento prezzi</h1>
     <div class="form-container">
         <div class="form-group">
-            <label for="searchQuery">Cerca per riferimento, titolo o codice EAN:</label>
-            <input type="text" id="searchQuery" name="searchQuery">
+            <label for="fromDate">Da:</label>
+            <input type="date" id="fromDate">
         </div>
-        <button onclick="searchProduct()">Cerca</button>
+        <div class="form-group">
+            <label for="toDate">A:</label>
+            <input type="date" id="toDate">
+        </div>
+        <button onclick="fetchStats()">Visualizza Statistiche</button>
     </div>
-    <div id="competitorDetails" class="competitor-details" style="display: none;"></div>
+
+    <div id="stats" class="stats"></div>
 
     <script>
         function openNav() {
-            document.getElementById("mySidebar").style.width = "250px";
+            document.getElementById("mySidebar").style.width = "340px";
         }
 
         function closeNav() {
             document.getElementById("mySidebar").style.width = "0";
         }
 
-        function searchProduct() {
-            const query = document.getElementById('searchQuery').value;
-            fetch(`/search-competitor-product?query=${query}`)
+        function fetchStats() {
+            const fromDate = document.getElementById('fromDate').value;
+            const toDate = document.getElementById('toDate').value;
+            let url = `/get-price-update-stats`;
+            if (fromDate || toDate) {
+                url += `?from_date=${fromDate}&to_date=${toDate}`;
+            }
+            fetch(url)
             .then(response => response.json())
             .then(data => {
-                if (data.results && data.results.length > 0) {
-                    const competitorDetails = document.getElementById('competitorDetails');
-                    competitorDetails.style.display = 'block';
-                    competitorDetails.innerHTML = '';
-                    data.results.forEach(result => {
-                        competitorDetails.innerHTML += `
-                            <p><strong>URL Concorrente:</strong> ${result.url}</p>
-                            <p><strong>Prodotto Shopify:</strong> ${result.product_title}</p>
-                            <p><strong>Prezzo Concorrente:</strong> ${result.competitor_price}</p>
-                            <p><strong>Prezzo Shopify:</strong> ${result.shopify_price}</p>
-                            <p><strong>Fornitore:</strong> ${result.vendor}</p>
-                            <p class="price-comparison ${result.comparison_class}">${result.price_comparison}</p>
-                            <hr>
-                        `;
-                    });
-                } else {
-                    alert('Nessun prodotto trovato');
+                const statsDiv = document.getElementById('stats');
+                statsDiv.innerHTML = `
+                    <h2>Statistiche</h2>
+                    <p>Totale aggiornamenti: ${data.total_updates}</p>
+                    <p>Prezzi variati: ${data.varied}</p>
+                    <p>Prezzi invariati: ${data.unchanged}</p>
+                `;
+
+                let vendorStatsHtml = `<div class="vendor-stats"><h3>Statistiche per Fornitore</h3><ul>`;
+                for (const vendor in data.vendors) {
+                    vendorStatsHtml += `
+                        <li><strong>${vendor}</strong> - Variati: ${data.vendors[vendor].varied}, Invariati: ${data.vendors[vendor].unchanged}</li>
+                    `;
                 }
+                vendorStatsHtml += `</ul></div>`;
+                statsDiv.innerHTML += vendorStatsHtml;
             })
             .catch(error => {
                 alert('Errore nella richiesta: ' + error.message);

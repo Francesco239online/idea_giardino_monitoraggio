@@ -37,6 +37,18 @@ class DomainSelector(db.Model):
     def __repr__(self):
         return f"<DomainSelector {self.domain}>"
 
+class PriceUpdateLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    product_id = db.Column(db.String(100), nullable=False)
+    old_price = db.Column(db.String(50), nullable=False)
+    new_price = db.Column(db.String(50), nullable=False)
+    vendor = db.Column(db.String(100), nullable=False)
+    status = db.Column(db.String(50), nullable=False)  # "varied" or "unchanged"
+
+    def __repr__(self):
+        return f"<PriceUpdateLog {self.product_id}>"
+
 logging.basicConfig(level=logging.INFO)
 
 @app.route('/')
@@ -46,6 +58,10 @@ def index():
 @app.route('/search-competitor')
 def search_competitor():
     return render_template('search_competitor.html')
+
+@app.route('/price-update-stats')
+def price_update_stats():
+    return render_template('price_update_stats.html')
 
 @app.route('/suggest-selector', methods=['POST'])
 def suggest_selector():
@@ -324,6 +340,44 @@ def search_competitor_product():
         app.logger.error(f"Error in search_competitor_product: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@app.route('/get-price-update-stats', methods=['GET'])
+def get_price_update_stats():
+    try:
+        from_date = request.args.get('from_date', None)
+        to_date = request.args.get('to_date', None)
+        
+        query = PriceUpdateLog.query
+        if from_date:
+            query = query.filter(PriceUpdateLog.timestamp >= datetime.strptime(from_date, '%Y-%m-%d'))
+        if to_date:
+            query = query.filter(PriceUpdateLog.timestamp <= datetime.strptime(to_date, '%Y-%m-%d'))
+        
+        logs = query.all()
+        stats = {
+            "total_updates": len(logs),
+            "varied": 0,
+            "unchanged": 0,
+            "vendors": {}
+        }
+
+        for log in logs:
+            if log.status == "varied":
+                stats["varied"] += 1
+            else:
+                stats["unchanged"] += 1
+            
+            if log.vendor not in stats["vendors"]:
+                stats["vendors"][log.vendor] = {
+                    "varied": 0,
+                    "unchanged": 0
+                }
+            stats["vendors"][log.vendor][log.status] += 1
+        
+        return jsonify(stats)
+    except Exception as e:
+        app.logger.error(f"Error in get_price_update_stats: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 def scrape_price(url, price_selector):
     try:
         app.logger.info(f"Scraping price from URL: {url} with selector: {price_selector}")
@@ -402,9 +456,25 @@ def update_competitor_prices():
         app.logger.info(f"Updating competitor prices at {datetime.now()}")
         competitors = Competitor.query.all()
         for competitor in competitors:
+            old_price = competitor.competitor_price
             new_price = scrape_price(competitor.url, competitor.price_selector)
-            if (new_price and new_price != competitor.competitor_price):
-                competitor.competitor_price = new_price
+            if new_price:
+                if new_price != old_price:
+                    status = "varied"
+                    competitor.competitor_price = new_price
+                else:
+                    status = "unchanged"
+                
+                # Log the price update
+                log = PriceUpdateLog(
+                    product_id=competitor.product_id,
+                    old_price=old_price,
+                    new_price=new_price,
+                    vendor=competitor.vendor,
+                    status=status
+                )
+                db.session.add(log)
+                
                 db.session.commit()
                 app.logger.info(f"Updated price for {competitor.url} to {new_price}")
     except Exception as e:
