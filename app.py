@@ -384,41 +384,45 @@ def scrape_price(url, price_selector):
         response = requests.get(url)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
-        price = soup.select_one(price_selector)
-        if price:
-            raw_price_text = price.text.strip()
+        price_element = soup.select_one(price_selector)
+        if price_element:
+            raw_price_text = price_element.text.strip()
             app.logger.info(f"Raw price text: {raw_price_text}")
 
-            # Use regex to extract the price
-            price_match = re.search(r'\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?', raw_price_text)
-            if price_match:
-                cleaned_price = price_match.group()
+            # Rimuovere eventuali spazi extra e caratteri non-ASCII
+            raw_price_text = re.sub(r'[^\x00-\x7F]+', '', raw_price_text)
+            raw_price_text = raw_price_text.replace('\xa0', '').replace('\n', '').replace('\r', '').strip()
 
-                # Normalize the price format
-                if '.' in cleaned_price and ',' in cleaned_price:
-                    # Case where both '.' and ',' are present; assume ',' is decimal separator
-                    if cleaned_price.rfind(',') > cleaned_price.rfind('.'):
-                        cleaned_price = cleaned_price.replace('.', '').replace(',', '.')
-                    else:
-                        cleaned_price = cleaned_price.replace('.', '').replace(',', '.')
-                elif ',' in cleaned_price:
-                    # Case where only ',' is present, assume ',' is decimal separator
-                    cleaned_price = cleaned_price.replace('.', '').replace(',', '.')
-                elif '.' in cleaned_price:
-                    # Case where only '.' is present
+            # Rimuovere eventuali simboli di valuta e altri caratteri non numerici eccetto ., e ,
+            raw_price_text = re.sub(r'[^\d.,]', '', raw_price_text)
+
+            # Trova tutti i possibili prezzi nel testo
+            price_matches = re.findall(r'\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?', raw_price_text)
+            if not price_matches:
+                app.logger.error("Could not extract price from the text")
+                return None
+            
+            # Prendere il primo prezzo trovato
+            cleaned_price = price_matches[0]
+
+            # Gestire il formato del prezzo europeo (punto come separatore delle migliaia, virgola come decimale)
+            if '.' in cleaned_price and ',' in cleaned_price:
+                # Assumiamo che il punto sia il separatore delle migliaia e la virgola il decimale
+                cleaned_price = cleaned_price.replace('.', '').replace(',', '.')
+            elif ',' in cleaned_price:
+                # Caso in cui c'è solo la virgola, assumiamo che sia il separatore decimale
+                cleaned_price = cleaned_price.replace('.', '').replace(',', '.')
+            elif '.' in cleaned_price:
+                # Caso in cui c'è solo il punto, può essere o il separatore delle migliaia o il decimale
+                if cleaned_price.count('.') == 1 and len(cleaned_price.split('.')[-1]) == 3:
+                    # Caso in cui il punto è il separatore delle migliaia
                     cleaned_price = cleaned_price.replace('.', '')
 
-                # Format price for European style (e.g., 1.421,00)
-                if '.' in cleaned_price:
-                    integer_part, decimal_part = cleaned_price.split('.')
-                    formatted_price = f"{integer_part[:-3]}.{integer_part[-3:]},{decimal_part[:2]}"
-                else:
-                    formatted_price = f"{cleaned_price[:-2]}.{cleaned_price[-2:]}"
+            # Convertire il prezzo pulito in un formato float standard
+            formatted_price = f"{float(cleaned_price):.2f}".replace('.', ',')
 
-                app.logger.info(f"Formatted price: {formatted_price}")
-                return formatted_price
-            else:
-                app.logger.error("Could not extract price from the text")
+            app.logger.info(f"Formatted price: {formatted_price}")
+            return formatted_price
         else:
             app.logger.error("Price not found with the given selector")
     except Exception as e:
