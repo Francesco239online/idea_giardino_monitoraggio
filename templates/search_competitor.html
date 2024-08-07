@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ricerca per concorrente</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        h1 {
+            text-align: center;
+        }
+        .form-container {
+            display: flex;
+            justify-content: center;
+        }
+        .form-group {
+            margin: 10px;
+            min-width: 200px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 10px 15px;
+            border: none;
+            background-color: #28a745;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #218838;
+        }
+        .competitor-details {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .price-comparison.lower {
+            color: green;
+        }
+        .price-comparison.higher {
+            color: red;
+        }
+        .price-comparison.equal {
+            color: blue;
+        }
+        .menu-icon {
+            font-size: 30px;
+            cursor: pointer;
+        }
+        .sidebar {
+            height: 100%;
+            width: 0;
+            position: fixed;
+            z-index: 1;
+            top: 0;
+            left: 0;
+            background-color: #111;
+            overflow-x: hidden;
+            transition: 0.5s;
+            padding-top: 60px;
+        }
+        .sidebar a {
+            padding: 10px 15px;
+            text-decoration: none;
+            font-size: 18px;
+            color: white;
+            display: block;
+            transition: 0.3s;
+        }
+        .sidebar a:hover {
+            background-color: #575757;
+        }
+        .sidebar .closebtn {
+            position: absolute;
+            top: 0;
+            right: 5px;
+            font-size: 36px;
+            margin-left: 50px;
+        }
+    </style>
+</head>
+<body>
+    <div id="menu" class="menu-icon" onclick="openNav()">&#9776;</div>
+    <div id="mySidebar" class="sidebar">
+        <a href="javascript:void(0)" class="closebtn" onclick="closeNav()">&times;</a>
+        <a href="/">Monitoraggio Concorrenza</a>
+        <a href="/search-competitor">Ricerca per concorrente</a>
+    </div>
+
+    <h1>Ricerca per concorrente</h1>
+    <div class="form-container">
+        <div class="form-group">
+            <label for="searchQuery">Cerca per riferimento, titolo o codice EAN:</label>
+            <input type="text" id="searchQuery" name="searchQuery">
+        </div>
+        <button onclick="searchProduct()">Cerca</button>
+    </div>
+    <div id="competitorDetails" class="competitor-details" style="display: none;"></div>
+
+    <script>
+        function openNav() {
+            document.getElementById("mySidebar").style.width = "250px";
+        }
+
+        function closeNav() {
+            document.getElementById("mySidebar").style.width = "0";
+        }
+
+        function searchProduct() {
+            const query = document.getElementById('searchQuery').value;
+            fetch(`/search-competitor-product?query=${query}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.results && data.results.length > 0) {
+                    const competitorDetails = document.getElementById('competitorDetails');
+                    competitorDetails.style.display = 'block';
+                    competitorDetails.innerHTML = '';
+                    data.results.forEach(result => {
+                        competitorDetails.innerHTML += `
+                            <p><strong>URL Concorrente:</strong> ${result.url}</p>
+                            <p><strong>Prodotto Shopify:</strong> ${result.product_title}</p>
+                            <p><strong>Prezzo Concorrente:</strong> ${result.competitor_price}</p>
+                            <p><strong>Prezzo Shopify:</strong> ${result.shopify_price}</p>
+                            <p><strong>Fornitore:</strong> ${result.vendor}</p>
+                            <p class="price-comparison ${result.comparison_class}">${result.price_comparison}</p>
+                            <hr>
+                        `;
+                    });
+                } else {
+                    alert('Nessun prodotto trovato');
+                }
+            })
+            .catch(error => {
+                alert('Errore nella richiesta: ' + error.message);
+            });
+        }
+    </script>
+</body>
+</html>

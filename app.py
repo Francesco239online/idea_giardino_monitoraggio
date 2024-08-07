@@ -9,6 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime
 from dotenv import load_dotenv
 import json
+from urllib.parse import urlparse
 
 app = Flask(__name__)
 
@@ -28,11 +29,39 @@ class Competitor(db.Model):
     def __repr__(self):
         return f"<Competitor {self.url}>"
 
+class DomainSelector(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    domain = db.Column(db.String(500), unique=True, nullable=False)
+    price_selector = db.Column(db.String(100), nullable=False)
+
+    def __repr__(self):
+        return f"<DomainSelector {self.domain}>"
+
 logging.basicConfig(level=logging.INFO)
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/search-competitor')
+def search_competitor():
+    return render_template('search_competitor.html')
+
+@app.route('/suggest-selector', methods=['POST'])
+def suggest_selector():
+    try:
+        url = request.json['url']
+        parsed_url = urlparse(url)
+        domain = f"{parsed_url.scheme}://{parsed_url.netloc}"
+        domain_selector = DomainSelector.query.filter_by(domain=domain).first()
+
+        if domain_selector:
+            return jsonify({'status': 'success', 'price_selector': domain_selector.price_selector})
+        else:
+            return jsonify({'status': 'error', 'message': 'No selector found for this domain'}), 404
+    except Exception as e:
+        app.logger.error(f"Error in suggest_selector: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/add-competitor', methods=['POST'])
 def add_competitor():
@@ -51,6 +80,18 @@ def add_competitor():
         if Competitor.query.filter_by(url=url).first():
             return jsonify({'status': 'error', 'message': 'Duplicate URL'}), 400
 
+        # Get the domain from the URL
+        parsed_url = urlparse(url)
+        domain = f"{parsed_url.scheme}://{parsed_url.netloc}"
+
+        # Check for duplicate Shopify product for the same competitor domain
+        existing_competitor = Competitor.query.filter_by(product_id=product_id).all()
+        for competitor in existing_competitor:
+            competitor_domain = urlparse(competitor.url)
+            competitor_domain_root = f"{competitor_domain.scheme}://{competitor_domain.netloc}"
+            if competitor_domain_root == domain:
+                return jsonify({'status': 'error', 'message': 'Duplicate Shopify product for this competitor domain'}), 400
+
         # Scrape the competitor's price
         competitor_price = scrape_price(url, price_selector)
         app.logger.info(f"Scraped price: {competitor_price}")
@@ -62,9 +103,26 @@ def add_competitor():
         shopify_product = get_shopify_product(product_id)
 
         # Add the competitor to the database
-        new_competitor = Competitor(url=url, product_id=product_id, vendor=vendor, price_selector=price_selector, competitor_price=competitor_price, shopify_product=json.dumps(shopify_product))
+        new_competitor = Competitor(
+            url=url,
+            product_id=product_id,
+            vendor=vendor,
+            price_selector=price_selector,
+            competitor_price=competitor_price,
+            shopify_product=json.dumps(shopify_product)
+        )
         db.session.add(new_competitor)
         db.session.commit()
+
+        # Save the price selector for the domain
+        domain_selector = DomainSelector.query.filter_by(domain=domain).first()
+        if not domain_selector:
+            new_domain_selector = DomainSelector(domain=domain, price_selector=price_selector)
+            db.session.add(new_domain_selector)
+            db.session.commit()
+        elif domain_selector.price_selector != price_selector:
+            domain_selector.price_selector = price_selector
+            db.session.commit()
 
         return jsonify({'status': 'success', 'competitor': {
             'id': new_competitor.id,
@@ -95,18 +153,37 @@ def delete_competitor():
 
 @app.route('/get-competitors', methods=['GET'])
 def get_competitors():
-    competitors = Competitor.query.all()
-    competitors_data = [{
-        'id': c.id,
-        'url': c.url,
-        'product_id': c.product_id,
-        'vendor': c.vendor,
-        'price_selector': c.price_selector,
-        'competitor_price': c.competitor_price,
-        'shopify_product': json.loads(c.shopify_product)
-    } for c in competitors]
-    app.logger.info(f"Competitors data: {competitors_data}")
-    return jsonify(competitors_data)
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+
+        pagination = Competitor.query.paginate(page=page, per_page=per_page, error_out=False)
+        competitors = pagination.items
+        app.logger.info(f"Fetched {len(competitors)} competitors from page {page} with {per_page} per page")
+
+        competitors_data = [{
+            'id': c.id,
+            'url': c.url,
+            'product_id': c.product_id,
+            'vendor': c.vendor,
+            'price_selector': c.price_selector,
+            'competitor_price': c.competitor_price,
+            'shopify_product': json.loads(c.shopify_product)
+        } for c in competitors]
+
+        response = {
+            'competitors': competitors_data,
+            'total': pagination.total,
+            'pages': pagination.pages,
+            'page': pagination.page,
+            'per_page': pagination.per_page
+        }
+        
+        app.logger.info(f"Competitors data prepared for response: {response}")
+        return jsonify(response)
+    except Exception as e:
+        app.logger.error(f"Error in get_competitors: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/scrape-price', methods=['POST'])
 def scrape_price_route():
@@ -132,70 +209,120 @@ def update_prices():
 
 @app.route('/get-shopify-products', methods=['GET'])
 def get_shopify_products():
-    url = f"https://{os.getenv('SHOPIFY_STORE_NAME')}.myshopify.com/admin/api/2023-07/products.json"
-    headers = {
-        "X-Shopify-Access-Token": os.getenv('SHOPIFY_ACCESS_TOKEN')
-    }
-    
-    products = []
-    page_info = None
-
-    while True:
-        params = {'limit': 250}
-        if page_info:
-            params['page_info'] = page_info
-
-        response = requests.get(url, headers=headers, params=params)
-        data = response.json()
+    try:
+        url = f"https://{os.getenv('SHOPIFY_STORE_NAME')}.myshopify.com/admin/api/2023-07/products.json"
+        headers = {
+            "X-Shopify-Access-Token": os.getenv('SHOPIFY_ACCESS_TOKEN')
+        }
         
-        if 'products' in data:
-            products.extend(data['products'])
+        products = []
+        page_info = None
 
-        if 'link' in response.headers:
-            links = requests.utils.parse_header_links(response.headers['link'])
-            next_link = next((link for link in links if link['rel'] == 'next'), None)
-            if next_link:
-                page_info = next_link['url'].split('page_info=')[1]
+        while True:
+            params = {'limit': 250}
+            if page_info:
+                params['page_info'] = page_info
+
+            response = requests.get(url, headers=headers, params=params)
+            data = response.json()
+            
+            if 'products' in data:
+                products.extend(data['products'])
+
+            if 'link' in response.headers:
+                links = requests.utils.parse_header_links(response.headers['link'])
+                next_link = next((link for link in links if link['rel'] == 'next'), None)
+                if next_link:
+                    page_info = next_link['url'].split('page_info=')[1]
+                else:
+                    break
             else:
                 break
-        else:
-            break
 
-    return jsonify({'products': products, 'total': len(products)})
+        return jsonify({'products': products, 'total': len(products)})
+    except Exception as e:
+        app.logger.error(f"Error in get_shopify_products: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/get-shopify-vendors', methods=['GET'])
 def get_shopify_vendors():
-    url = f"https://{os.getenv('SHOPIFY_STORE_NAME')}.myshopify.com/admin/api/2023-07/products.json"
-    headers = {
-        "X-Shopify-Access-Token": os.getenv('SHOPIFY_ACCESS_TOKEN')
-    }
-    
-    vendors = set()
-    page_info = None
-
-    while True:
-        params = {'limit': 250}
-        if page_info:
-            params['page_info'] = page_info
-
-        response = requests.get(url, headers=headers, params=params)
-        data = response.json()
+    try:
+        url = f"https://{os.getenv('SHOPIFY_STORE_NAME')}.myshopify.com/admin/api/2023-07/products.json"
+        headers = {
+            "X-Shopify-Access-Token": os.getenv('SHOPIFY_ACCESS_TOKEN')
+        }
         
-        if 'products' in data:
-            for product in data['products']:
-                vendors.add(product['vendor'])
+        vendors = set()
+        page_info = None
 
-        if 'link' in response.headers:
-            links = requests.utils.parse_header_links(response.headers['link'])
-            next_link = next((link for link in links if link['rel'] == 'next'), None)
-            if next_link:
-                page_info = next_link['url'].split('page_info=')[1]
+        while True:
+            params = {'limit': 250}
+            if page_info:
+                params['page_info'] = page_info
+
+            response = requests.get(url, headers=headers, params=params)
+            data = response.json()
+            
+            if 'products' in data:
+                for product in data['products']:
+                    vendors.add(product['vendor'])
+
+            if 'link' in response.headers:
+                links = requests.utils.parse_header_links(response.headers['link'])
+                next_link = next((link for link in links if link['rel'] == 'next'), None)
+                if next_link:
+                    page_info = next_link['url'].split('page_info=')[1]
+                else:
+                    break
             else:
                 break
-        else:
-            break
 
-    return jsonify(list(vendors))
+        return jsonify(list(vendors))
+    except Exception as e:
+        app.logger.error(f"Error in get_shopify_vendors: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/search-competitor-product', methods=['GET'])
+def search_competitor_product():
+    try:
+        query = request.args.get('query')
+        competitors = Competitor.query.all()
+        results = []
+        
+        for competitor in competitors:
+            shopify_product = json.loads(competitor.shopify_product)
+            if (query.lower() in shopify_product['title'].lower() or 
+                any(query.lower() in variant['sku'].lower() for variant in shopify_product['variants']) or 
+                any(query.lower() in variant['barcode'].lower() for variant in shopify_product['variants'])):
+                
+                competitor_data = {
+                    'url': competitor.url,
+                    'product_title': shopify_product['title'],
+                    'competitor_price': competitor.competitor_price,
+                    'shopify_price': shopify_product['variants'][0]['price'],
+                    'vendor': shopify_product['vendor'],
+                }
+                
+                shopify_price = float(shopify_product['variants'][0]['price'].replace(',', '.'))
+                competitor_price = float(competitor.competitor_price.replace('.', '').replace(',', '.'))
+                if shopify_price < competitor_price:
+                    percentage = ((competitor_price - shopify_price) / competitor_price * 100)
+                    competitor_data['price_comparison'] = f"Prezzo inferiore del {percentage:.2f}% (€{(competitor_price - shopify_price):.2f})"
+                    competitor_data['comparison_class'] = 'lower'
+                elif shopify_price > competitor_price:
+                    percentage = ((shopify_price - competitor_price) / competitor_price * 100)
+                    competitor_data['price_comparison'] = f"Prezzo superiore del {percentage:.2f}% (€{(shopify_price - competitor_price):.2f})"
+                    competitor_data['comparison_class'] = 'higher'
+                else:
+                    competitor_data['price_comparison'] = 'Prezzo uguale'
+                    competitor_data['comparison_class'] = 'equal'
+                
+                results.append(competitor_data)
+        
+        return jsonify({'results': results})
+    except Exception as e:
+        app.logger.error(f"Error in search_competitor_product: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 def scrape_price(url, price_selector):
     try:
@@ -245,32 +372,43 @@ def scrape_price(url, price_selector):
     return None
 
 def get_shopify_product(product_id):
-    url = f"https://{os.getenv('SHOPIFY_STORE_NAME')}.myshopify.com/admin/api/2023-07/products/{product_id}.json"
-    headers = {
-        "X-Shopify-Access-Token": os.getenv('SHOPIFY_ACCESS_TOKEN')
-    }
-    response = requests.get(url, headers=headers)
-    product = response.json().get('product', {})
-    return product
+    try:
+        url = f"https://{os.getenv('SHOPIFY_STORE_NAME')}.myshopify.com/admin/api/2023-07/products/{product_id}.json"
+        headers = {
+            "X-Shopify-Access-Token": os.getenv('SHOPIFY_ACCESS_TOKEN')
+        }
+        response = requests.get(url, headers=headers)
+        product = response.json().get('product', {})
+        return product
+    except Exception as e:
+        app.logger.error(f"Error in get_shopify_product: {e}")
+        return {}
 
 def get_cost_per_article(product_id):
-    url = f"https://{os.getenv('SHOPIFY_STORE_NAME')}.myshopify.com/admin/api/2023-07/variants/{product_id}.json"
-    headers = {
-        "X-Shopify-Access-Token": os.getenv('SHOPIFY_ACCESS_TOKEN')
-    }
-    response = requests.get(url, headers=headers)
-    variant = response.json().get('variant', {})
-    return variant.get('cost', 0.0)
+    try:
+        url = f"https://{os.getenv('SHOPIFY_STORE_NAME')}.myshopify.com/admin/api/2023-07/variants/{product_id}.json"
+        headers = {
+            "X-Shopify-Access-Token": os.getenv('SHOPIFY_ACCESS_TOKEN')
+        }
+        response = requests.get(url, headers=headers)
+        variant = response.json().get('variant', {})
+        return variant.get('cost', 0.0)
+    except Exception as e:
+        app.logger.error(f"Error in get_cost_per_article: {e}")
+        return 0.0
 
 def update_competitor_prices():
-    app.logger.info(f"Updating competitor prices at {datetime.now()}")
-    competitors = Competitor.query.all()
-    for competitor in competitors:
-        new_price = scrape_price(competitor.url, competitor.price_selector)
-        if new_price:
-            competitor.competitor_price = new_price
-            db.session.commit()
-            app.logger.info(f"Updated price for {competitor.url} to {new_price}")
+    try:
+        app.logger.info(f"Updating competitor prices at {datetime.now()}")
+        competitors = Competitor.query.all()
+        for competitor in competitors:
+            new_price = scrape_price(competitor.url, competitor.price_selector)
+            if (new_price and new_price != competitor.competitor_price):
+                competitor.competitor_price = new_price
+                db.session.commit()
+                app.logger.info(f"Updated price for {competitor.url} to {new_price}")
+    except Exception as e:
+        app.logger.error(f"Error in update_competitor_prices: {e}")
 
 if __name__ == '__main__':
     with app.app_context():

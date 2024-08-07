@@ -81,9 +81,67 @@
         .price-comparison.equal {
             color: blue;
         }
+        .pagination {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        .pagination button {
+            margin: 0 5px;
+            padding: 5px 10px;
+            border: 1px solid #ccc;
+            background-color: #e0e0e0;
+            cursor: pointer;
+        }
+        .pagination button.active {
+            background-color: #007bff;
+            color: white;
+        }
+        .menu-icon {
+            font-size: 30px;
+            cursor: pointer;
+        }
+        .sidebar {
+            height: 100%;
+            width: 0;
+            position: fixed;
+            z-index: 1;
+            top: 0;
+            left: 0;
+            background-color: #111;
+            overflow-x: hidden;
+            transition: 0.5s;
+            padding-top: 60px;
+        }
+        .sidebar a {
+            padding: 10px 15px;
+            text-decoration: none;
+            font-size: 18px;
+            color: white;
+            display: block;
+            transition: 0.3s;
+        }
+        .sidebar a:hover {
+            background-color: #575757;
+        }
+        .sidebar .closebtn {
+            position: absolute;
+            top: 0;
+            right: 5px;
+            font-size: 36px;
+            margin-left: 50px;
+            margin-bottom: 30px;
+        }
     </style>
 </head>
 <body>
+    <div id="menu" class="menu-icon" onclick="openNav()">&#9776;</div>
+    <div id="mySidebar" class="sidebar">
+        <a href="javascript:void(0)" class="closebtn" onclick="closeNav()">&times;</a>
+        <a href="/">Monitoraggio Concorrenza</a>
+        <a href="/search-competitor">Ricerca per concorrente</a>
+    </div>
+
     <h1>Monitoraggio Concorrenza</h1>
     <div id="message" style="color: red; font-weight: bold;"></div>
     <div id="product-count"></div>
@@ -115,10 +173,21 @@
     </form>
 
     <div class="competitor-list" id="competitorList"></div>
+    <div class="pagination" id="pagination"></div>
 
     <script>
+        function openNav() {
+            document.getElementById("mySidebar").style.width = "250px";
+        }
+
+        function closeNav() {
+            document.getElementById("mySidebar").style.width = "0";
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             let competitors = [];
+            let currentPage = 1;
+            const perPage = 10;
 
             fetch('/get-shopify-products')
             .then(response => response.json())
@@ -127,7 +196,7 @@
                 data.products.forEach(product => {
                     const option = document.createElement('option');
                     option.value = product.id;
-                    option.textContent = product.title + " (" + product.variants[0].sku + ")";
+                    option.textContent = `${product.title} (${product.variants[0].sku})`;
                     productSelect.appendChild(option);
                 });
                 document.getElementById('product-count').textContent = `Totale Prodotti: ${data.total}`;
@@ -168,9 +237,34 @@
                     data.forEach(product => {
                         const option = document.createElement('option');
                         option.value = product.id;
-                        option.textContent = product.title + " (" + product.variants[0].sku + ")";
+                        option.textContent = `${product.title} (${product.variants[0].sku})`;
                         productSelect.appendChild(option);
                     });
+                });
+            });
+
+            document.getElementById('url').addEventListener('blur', function() {
+                const url = this.value;
+                fetch('/suggest-selector', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url })
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(data => { throw new Error(data.message); });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.status === 'success') {
+                        document.getElementById('price_selector').value = data.price_selector;
+                    }
+                })
+                .catch(error => {
+                    console.log('Errore nella richiesta:', error.message);
                 });
             });
 
@@ -217,8 +311,7 @@
                     if (data.status === 'success') {
                         messageElement.style.color = 'green';
                         messageElement.textContent = 'Concorrente aggiunto con successo';
-                        competitors.push(data.competitor);
-                        updateCompetitorList();
+                        loadCompetitors(currentPage);  // Reload competitors for the current page
                     } else {
                         messageElement.style.color = 'red';
                         messageElement.textContent = 'Errore: ' + data.message;
@@ -231,19 +324,20 @@
                 });
             });
 
-            fetch('/get-competitors')
-            .then(response => response.json())
-            .then(data => {
-                competitors = data;
-                console.log("Competitors data: ", competitors); // Log the data for debugging
-                updateCompetitorList();
-            });
+            function loadCompetitors(page) {
+                fetch(`/get-competitors?page=${page}&per_page=${perPage}`)
+                .then(response => response.json())
+                .then(data => {
+                    competitors = data.competitors;
+                    updateCompetitorList();
+                    updatePagination(data.page, data.pages);
+                });
+            }
 
             function updateCompetitorList() {
                 const competitorList = document.getElementById('competitorList');
                 competitorList.innerHTML = '';
                 competitors.forEach((competitor, index) => {
-                    console.log("Processing competitor: ", competitor); // Log the data for debugging
                     const shopifyProduct = competitor.shopify_product;
                     const shopifyPrice = parseFloat(shopifyProduct.variants[0].price.replace(',', '.'));
                     const competitorPrice = parseFloat(competitor.competitor_price.replace('.', '').replace(',', '.'));
@@ -280,6 +374,23 @@
                 });
             }
 
+            function updatePagination(currentPage, totalPages) {
+                const pagination = document.getElementById('pagination');
+                pagination.innerHTML = '';
+
+                for (let page = 1; page <= totalPages; page++) {
+                    const button = document.createElement('button');
+                    button.textContent = page;
+                    if (page === currentPage) {
+                        button.classList.add('active');
+                    }
+                    button.addEventListener('click', () => {
+                        loadCompetitors(page);
+                    });
+                    pagination.appendChild(button);
+                }
+            }
+
             window.deleteCompetitor = function(index) {
                 const formData = new FormData();
                 formData.append('competitor_id', competitors[index].id);
@@ -291,8 +402,7 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.status === 'success') {
-                        competitors.splice(index, 1);
-                        updateCompetitorList();
+                        loadCompetitors(currentPage);  // Reload competitors for the current page
                     } else {
                         alert(data.message);
                     }
@@ -301,6 +411,8 @@
                     alert('Errore nella richiesta: ' + error.message);
                 });
             }
+
+            loadCompetitors(currentPage);  // Load competitors for the first page initially
         });
     </script>
 </body>
