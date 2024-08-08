@@ -6,37 +6,50 @@
     <title>Statistiche aggiornamento prezzi</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Arial', sans-serif;
             margin: 20px;
         }
         h1 {
             text-align: center;
+            font-size: 2.5em;
         }
         .form-container {
             display: flex;
             justify-content: center;
+            flex-direction: column;
+            align-items: center;
             margin-bottom: 20px;
         }
         .form-group {
             margin: 10px;
+            display: flex;
+            flex-direction: column;
         }
         .form-group label {
-            display: block;
             margin-bottom: 5px;
+            font-weight: bold;
         }
         .form-group input {
             width: 200px;
-            padding: 8px;
-            box-sizing: border-box;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 1em;
+        }
+        .form-group-row {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+            margin-top: 10px;
         }
         button {
-            padding: 10px 15px;
+            padding: 10px 20px;
             border: none;
             background-color: #28a745;
             color: white;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 16px;
+            font-size: 1em;
         }
         button:hover {
             background-color: #218838;
@@ -46,9 +59,11 @@
         }
         .stats h2 {
             text-align: center;
+            font-size: 2em;
         }
         .stats p {
-            font-size: 18px;
+            font-size: 1.2em;
+            margin-bottom: 10px;
         }
         .vendor-stats {
             margin-top: 20px;
@@ -57,6 +72,7 @@
         }
         .vendor-stats h3 {
             text-align: center;
+            font-size: 1.5em;
         }
         .vendor-stats ul {
             list-style: none;
@@ -64,11 +80,14 @@
         }
         .vendor-stats li {
             margin: 5px 0;
-            font-size: 18px;
+            font-size: 1.2em;
         }
         .menu-icon {
             font-size: 30px;
             cursor: pointer;
+            position: absolute;
+            top: 10px;
+            left: 10px;
         }
         .sidebar {
             height: 100%;
@@ -100,6 +119,58 @@
             font-size: 36px;
             margin-left: 50px;
         }
+        .price-changes-sidebar {
+            height: 100%;
+            width: 0;
+            position: fixed;
+            z-index: 2;
+            top: 0;
+            right: 0;
+            background-color: #f9f9f9;
+            overflow-x: hidden;
+            transition: 0.5s;
+            padding-top: 60px;
+            border-left: 1px solid #ccc;
+        }
+        .price-changes-sidebar .closebtn {
+            position: absolute;
+            top: 0;
+            right: 25px;
+            font-size: 36px;
+            margin-left: 50px;
+        }
+        .price-changes-sidebar h2 {
+            padding: 10px;
+            font-size: 1.5em;
+            color: #333;
+            border-bottom: 1px solid #ccc;
+            margin-bottom: 20px;
+        }
+        .price-change {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+        }
+        .price-change p {
+            margin: 5px 0;
+        }
+        .price-change .product-title {
+            font-weight: bold;
+            font-size: 1.2em;
+            color: #007bff;
+        }
+        .price-change .product-url {
+            font-size: 0.9em;
+            color: #555;
+            word-wrap: break-word;
+        }
+        .price-change .old-price, .price-change .new-price {
+            font-size: 1em;
+            color: #333;
+        }
+        .price-change .timestamp {
+            font-size: 0.8em;
+            color: #888;
+        }
     </style>
 </head>
 <body>
@@ -121,18 +192,41 @@
             <label for="toDate">A:</label>
             <input type="date" id="toDate">
         </div>
-        <button onclick="fetchStats()">Visualizza Statistiche</button>
+        <div class="form-group">
+            <label for="vendor">Fornitore:</label>
+            <input type="text" id="vendor">
+        </div>
+        <div class="form-group-row">
+            <button onclick="fetchStats()">Visualizza Statistiche</button>
+        </div>
+        <div class="form-group-row">
+            <button onclick="fetchPriceChanges()">Visualizza Cambiamenti di Prezzo</button>
+        </div>
     </div>
 
     <div id="stats" class="stats"></div>
 
+    <div id="priceChangesSidebar" class="price-changes-sidebar">
+        <a href="javascript:void(0)" class="closebtn" onclick="closePriceChanges()">&times;</a>
+        <h2>Cambiamenti di prezzo per <span id="vendorName"></span></h2>
+        <div id="priceChangesContent"></div>
+    </div>
+
     <script>
         function openNav() {
-            document.getElementById("mySidebar").style.width = "340px";
+            document.getElementById("mySidebar").style.width = "250px";
         }
 
         function closeNav() {
             document.getElementById("mySidebar").style.width = "0";
+        }
+
+        function openPriceChanges() {
+            document.getElementById("priceChangesSidebar").style.width = "400px";
+        }
+
+        function closePriceChanges() {
+            document.getElementById("priceChangesSidebar").style.width = "0";
         }
 
         function fetchStats() {
@@ -161,6 +255,48 @@
                 }
                 vendorStatsHtml += `</ul></div>`;
                 statsDiv.innerHTML += vendorStatsHtml;
+            })
+            .catch(error => {
+                alert('Errore nella richiesta: ' + error.message);
+            });
+        }
+
+        function fetchPriceChanges() {
+            const fromDate = document.getElementById('fromDate').value;
+            const toDate = document.getElementById('toDate').value;
+            const vendor = document.getElementById('vendor').value;
+            let url = `/get-price-change-report?vendor=${vendor}`;
+            if (fromDate) {
+                url += `&from_date=${fromDate}`;
+            }
+            if (toDate) {
+                url += `&to_date=${toDate}`;
+            }
+            fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                const priceChangesContent = document.getElementById('priceChangesContent');
+                const vendorName = document.getElementById('vendorName');
+                vendorName.textContent = vendor;
+                priceChangesContent.innerHTML = '';
+
+                if (data.price_changes.length === 0) {
+                    priceChangesContent.innerHTML = '<p>Nessun cambiamento di prezzo trovato.</p>';
+                } else {
+                    data.price_changes.forEach(change => {
+                        priceChangesContent.innerHTML += `
+                            <div class="price-change">
+                                <p class="timestamp">Data: ${new Date(change.timestamp).toUTCString()}</p>
+                                <p class="product-title">Prodotto: ${change.product_title}</p>
+                                <p class="product-url">URL: <a href="${change.url}" target="_blank">${change.url}</a></p>
+                                <p class="old-price">Vecchio Prezzo: €${change.old_price}</p>
+                                <p class="new-price">Nuovo Prezzo: €${change.new_price}</p>
+                            </div>
+                        `;
+                    });
+                }
+
+                openPriceChanges();
             })
             .catch(error => {
                 alert('Errore nella richiesta: ' + error.message);

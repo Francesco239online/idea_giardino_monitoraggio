@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, abort
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_wtf import FlaskForm
@@ -26,6 +26,7 @@ app.config['SESSION_COOKIE_SECURE'] = True
 app.config['REMEMBER_COOKIE_SECURE'] = True
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['REMEMBER_COOKIE_HTTPONLY'] = True
+update_secret = os.getenv('UPDATE_SECRET')
 
 # Inizializza l'estensione di Flask
 db = SQLAlchemy(app)
@@ -297,8 +298,9 @@ def scrape_price_route():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/update-prices', methods=['POST'])
-@login_required
 def update_prices():
+    if request.json.get('secret') != update_secret:
+        abort(401)
     try:
         update_competitor_prices()
         return jsonify({'status': 'success', 'message': 'Prices updated successfully'})
@@ -463,6 +465,46 @@ def get_price_update_stats():
         return jsonify(stats)
     except Exception as e:
         app.logger.error(f"Error in get_price_update_stats: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    
+
+@app.route('/get-price-change-report', methods=['GET'])
+@login_required
+def get_price_change_report():
+    try:
+        from_date = request.args.get('from_date', None)
+        to_date = request.args.get('to_date', None)
+        vendor = request.args.get('vendor', None)
+        
+        query = PriceUpdateLog.query
+        if from_date:
+            query = query.filter(PriceUpdateLog.timestamp >= datetime.strptime(from_date, '%Y-%m-%d'))
+        if to_date:
+            query = query.filter(PriceUpdateLog.timestamp <= datetime.strptime(to_date, '%Y-%m-%d'))
+        if vendor:
+            query = query.filter_by(vendor=vendor)
+        
+        logs = query.all()
+        price_changes = []
+        for log in logs:
+            old_price_normalized = re.sub(r'[^\d]', '', log.old_price)
+            new_price_normalized = re.sub(r'[^\d]', '', log.new_price)
+            if old_price_normalized != new_price_normalized:  # Aggiungi questo controllo
+                competitor = Competitor.query.filter_by(product_id=log.product_id).first()
+                price_changes.append({
+                    "timestamp": log.timestamp,
+                    "product_id": log.product_id,
+                    "old_price": log.old_price,
+                    "new_price": log.new_price,
+                    "vendor": log.vendor,
+                    "status": log.status,
+                    "url": competitor.url if competitor else None,
+                    "product_title": json.loads(competitor.shopify_product)["title"] if competitor else None
+                })
+        
+        return jsonify({'price_changes': price_changes})
+    except Exception as e:
+        app.logger.error(f"Error in get_price_change_report: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 def scrape_price(url, price_selector):
