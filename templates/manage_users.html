@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Manage Users</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+        background-color: #f8f9fa;
+      }
+      .form-container {
+        background-color: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        margin-bottom: 20px;
+      }
+      .form-container h2 {
+        margin-top: 0;
+      }
+      .form-container form {
+        display: flex;
+        flex-direction: column;
+      }
+      .form-container form input {
+        margin-bottom: 10px;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+      }
+      .form-container form input[type="submit"] {
+        background-color: #007bff;
+        color: white;
+        border: none;
+        cursor: pointer;
+      }
+      .users-list {
+        background-color: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      }
+      .users-list table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .users-list table, th, td {
+        border: 1px solid #ddd;
+      }
+      .users-list th, td {
+        padding: 8px;
+        text-align: left;
+      }
+      .users-list th {
+        background-color: #f2f2f2;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="form-container">
+      <h2>Add User</h2>
+      <form method="POST">
+        {{ form.hidden_tag() }}
+        <p>
+          {{ form.username.label }}<br>
+          {{ form.username(size=32) }}<br>
+          {% for error in form.username.errors %}
+            <span style="color: red;">[{{ error }}]</span>
+          {% endfor %}
+        </p>
+        <p>
+          {{ form.password.label }}<br>
+          {{ form.password(size=32) }}<br>
+          {% for error in form.password.errors %}
+            <span style="color: red;">[{{ error }}]</span>
+          {% endfor %}
+        </p>
+        <p><input type="submit" value="Add User"></p>
+      </form>
+    </div>
+
+    <div class="users-list">
+      <h2>Users</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Username</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for user in users %}
+          <tr>
+            <td>{{ user.id }}</td>
+            <td>{{ user.username }}</td>
+            <td>
+              <form action="{{ url_for('delete_user', user_id=user.id) }}" method="post">
+                <button type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </body>
+</html>

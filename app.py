@@ -1,5 +1,10 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from flask_wtf import FlaskForm
+from wtforms import StringField, PasswordField, BooleanField
+from wtforms.validators import InputRequired, Length
+from werkzeug.security import generate_password_hash, check_password_hash
 import requests
 from bs4 import BeautifulSoup
 import logging
@@ -13,9 +18,25 @@ from urllib.parse import urlparse
 
 app = Flask(__name__)
 
+# Carica la configurazione dal file .env
 load_dotenv()
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///competitors.db'
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')  # Assicurati di avere una chiave segreta nel file .env
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['REMEMBER_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['REMEMBER_COOKIE_HTTPONLY'] = True
+
+# Inizializza l'estensione di Flask
 db = SQLAlchemy(app)
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), unique=True)
+    password = db.Column(db.String(150))
 
 class Competitor(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -49,21 +70,78 @@ class PriceUpdateLog(db.Model):
     def __repr__(self):
         return f"<PriceUpdateLog {self.product_id}>"
 
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+class LoginForm(FlaskForm):
+    username = StringField('username', validators=[InputRequired(), Length(min=4, max=150)])
+    password = PasswordField('password', validators=[InputRequired(), Length(min=4, max=150)])
+    remember = BooleanField('remember me')
+
+class UserForm(FlaskForm):
+    username = StringField('username', validators=[InputRequired(), Length(min=4, max=150)])
+    password = PasswordField('password', validators=[InputRequired(), Length(min=4, max=150)])
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    form = LoginForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(username=form.username.data).first()
+        if user and check_password_hash(user.password, form.password.data):
+            login_user(user, remember=form.remember.data)
+            return redirect(url_for('index'))
+        flash('Invalid username or password')
+    return render_template('login.html', form=form)
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
+@app.route('/manage_users', methods=['GET', 'POST'])
+@login_required
+def manage_users():
+    form = UserForm()
+    if form.validate_on_submit():
+        hashed_password = generate_password_hash(form.password.data, method='pbkdf2:sha256')
+        new_user = User(username=form.username.data, password=hashed_password)
+        db.session.add(new_user)
+        db.session.commit()
+        flash('User added successfully!')
+    users = User.query.all()
+    return render_template('manage_users.html', form=form, users=users)
+
+@app.route('/delete_user/<int:user_id>', methods=['POST'])
+@login_required
+def delete_user(user_id):
+    user = User.query.get(user_id)
+    if user:
+        db.session.delete(user)
+        db.session.commit()
+        flash('User deleted successfully!')
+    return redirect(url_for('manage_users'))
+
 logging.basicConfig(level=logging.INFO)
 
 @app.route('/')
+@login_required
 def index():
     return render_template('index.html')
 
 @app.route('/search-competitor')
+@login_required
 def search_competitor():
     return render_template('search_competitor.html')
 
 @app.route('/price-update-stats')
+@login_required
 def price_update_stats():
     return render_template('price_update_stats.html')
 
 @app.route('/suggest-selector', methods=['POST'])
+@login_required
 def suggest_selector():
     try:
         url = request.json['url']
@@ -80,6 +158,7 @@ def suggest_selector():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/add-competitor', methods=['POST'])
+@login_required
 def add_competitor():
     try:
         url = request.form['url']
@@ -154,6 +233,7 @@ def add_competitor():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/delete-competitor', methods=['POST'])
+@login_required
 def delete_competitor():
     try:
         competitor_id = request.form['competitor_id']
@@ -168,6 +248,7 @@ def delete_competitor():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/get-competitors', methods=['GET'])
+@login_required
 def get_competitors():
     try:
         page = request.args.get('page', 1, type=int)
@@ -202,6 +283,7 @@ def get_competitors():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/scrape-price', methods=['POST'])
+@login_required
 def scrape_price_route():
     try:
         url = request.json['url']
@@ -215,6 +297,7 @@ def scrape_price_route():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/update-prices', methods=['POST'])
+@login_required
 def update_prices():
     try:
         update_competitor_prices()
@@ -224,6 +307,7 @@ def update_prices():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/get-shopify-products', methods=['GET'])
+@login_required
 def get_shopify_products():
     try:
         url = f"https://{os.getenv('SHOPIFY_STORE_NAME')}.myshopify.com/admin/api/2023-07/products.json"
@@ -261,6 +345,7 @@ def get_shopify_products():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/get-shopify-vendors', methods=['GET'])
+@login_required
 def get_shopify_vendors():
     try:
         url = f"https://{os.getenv('SHOPIFY_STORE_NAME')}.myshopify.com/admin/api/2023-07/products.json"
@@ -299,6 +384,7 @@ def get_shopify_vendors():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/search-competitor-product', methods=['GET'])
+@login_required
 def search_competitor_product():
     try:
         query = request.args.get('query')
@@ -341,6 +427,7 @@ def search_competitor_product():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/get-price-update-stats', methods=['GET'])
+@login_required
 def get_price_update_stats():
     try:
         from_date = request.args.get('from_date', None)
@@ -487,6 +574,17 @@ def update_competitor_prices():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
+
+        # Specifica l'username e la password che desideri
+        admin_username = 'Francesco'
+        admin_password = '27-Nov1994'
+
+        # Creazione di un utente amministratore se non esiste
+        if not User.query.filter_by(username=admin_username).first():
+            hashed_password = generate_password_hash(admin_password, method='pbkdf2:sha256')
+            new_user = User(username=admin_username, password=hashed_password)
+            db.session.add(new_user)
+            db.session.commit()
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(func=update_competitor_prices, trigger="interval", hours=24)
