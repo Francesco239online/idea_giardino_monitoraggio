@@ -8,44 +8,72 @@
         body {
             font-family: Arial, sans-serif;
             margin: 20px;
+            background-color: #f4f4f4;
         }
         h1 {
             text-align: center;
+            color: #333;
         }
         .form-container {
             display: flex;
             justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
         }
         .form-group {
             margin: 10px;
             min-width: 200px;
+            flex-grow: 1;
         }
         .form-group label {
             display: block;
             margin-bottom: 5px;
+            color: #555;
         }
-        .form-group input {
+        .form-group input, .form-group select {
             width: 100%;
             padding: 8px;
             box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 4px;
         }
         button {
-            padding: 10px 15px;
+            padding: 10px 20px;
             border: none;
             background-color: #28a745;
             color: white;
             border-radius: 4px;
             cursor: pointer;
             font-size: 16px;
+            margin-top: 10px;
         }
         button:hover {
             background-color: #218838;
         }
         .competitor-details {
             margin-top: 20px;
-            padding: 10px;
+            padding: 20px;
+            background-color: #fff;
             border: 1px solid #ccc;
-            border-radius: 4px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        .competitor-item {
+            margin-bottom: 20px;
+        }
+        .competitor-item p {
+            margin: 5px 0;
+        }
+        .competitor-item a {
+            color: #007bff;
+            text-decoration: none;
+        }
+        .competitor-item a:hover {
+            text-decoration: underline;
         }
         .price-comparison.lower {
             color: green;
@@ -107,6 +135,12 @@
             <label for="searchQuery">Cerca per riferimento, titolo o codice EAN:</label>
             <input type="text" id="searchQuery" name="searchQuery">
         </div>
+        <div class="form-group">
+            <label for="vendorSelect">Fornitore:</label>
+            <select id="vendorSelect" name="vendor">
+                <option value="">Seleziona Fornitore</option>
+            </select>
+        </div>
         <button onclick="searchProduct()">Cerca</button>
     </div>
     <div id="competitorDetails" class="competitor-details" style="display: none;"></div>
@@ -120,28 +154,75 @@
             document.getElementById("mySidebar").style.width = "0";
         }
 
-        function searchProduct() {
-            const query = document.getElementById('searchQuery').value;
-            fetch(`/search-competitor-product?query=${query}`)
+        document.addEventListener('DOMContentLoaded', function() {
+            // Carica fornitori nel menu a tendina
+            fetch('/get-shopify-vendors')
             .then(response => response.json())
             .then(data => {
+                const vendorSelect = document.getElementById('vendorSelect');
+                data.forEach(vendor => {
+                    const option = document.createElement('option');
+                    option.value = vendor;
+                    option.textContent = vendor;
+                    vendorSelect.appendChild(option);
+                });
+            });
+        });
+
+        function searchProduct() {
+            const query = document.getElementById('searchQuery').value;
+            const vendor = document.getElementById('vendorSelect').value;
+            let url = `/search-competitor-product?query=${query}`;
+            if (vendor) {
+                url += `&vendor=${vendor}`;
+            }
+            fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                const competitorDetails = document.getElementById('competitorDetails');
                 if (data.results && data.results.length > 0) {
-                    const competitorDetails = document.getElementById('competitorDetails');
                     competitorDetails.style.display = 'block';
                     competitorDetails.innerHTML = '';
                     data.results.forEach(result => {
                         competitorDetails.innerHTML += `
-                            <p><strong>URL Concorrente:</strong> ${result.url}</p>
-                            <p><strong>Prodotto Shopify:</strong> ${result.product_title}</p>
-                            <p><strong>Prezzo Concorrente:</strong> ${result.competitor_price}</p>
-                            <p><strong>Prezzo Shopify:</strong> ${result.shopify_price}</p>
-                            <p><strong>Fornitore:</strong> ${result.vendor}</p>
-                            <p class="price-comparison ${result.comparison_class}">${result.price_comparison}</p>
+                            <div class="competitor-item">
+                                <div>
+                                    <p><strong>URL Concorrente:</strong> <a href="${result.url}" target="_blank">${result.url}</a></p>
+                                    <p><strong>Prodotto Shopify:</strong> <a href="https://idea-giardino.com/products/${result.product_handle}" target="_blank">${result.product_title}</a></p>
+                                    <p><strong>Prezzo Concorrente:</strong> ${result.competitor_price}</p>
+                                    <p><strong>Prezzo Shopify:</strong> ${result.shopify_price}</p>
+                                    <p><strong>Fornitore:</strong> ${result.vendor}</p>
+                                    <p class="price-comparison ${result.comparison_class}">${result.price_comparison}</p>
+                                </div>
+                                <button onclick="deleteCompetitor(${result.id})">Elimina</button>
+                            </div>
                             <hr>
                         `;
                     });
                 } else {
+                    competitorDetails.style.display = 'none';
                     alert('Nessun prodotto trovato');
+                }
+            })
+            .catch(error => {
+                alert('Errore nella richiesta: ' + error.message);
+            });
+        }
+
+        function deleteCompetitor(id) {
+            const formData = new FormData();
+            formData.append('competitor_id', id);
+
+            fetch('/delete-competitor', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    searchProduct();  // Reload competitors after deletion
+                } else {
+                    alert(data.message);
                 }
             })
             .catch(error => {

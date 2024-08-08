@@ -16,20 +16,21 @@
         .form-container {
             display: flex;
             justify-content: center;
-            flex-direction: column;
             align-items: center;
             margin-bottom: 20px;
+            flex-wrap: wrap;
         }
         .form-group {
             margin: 10px;
             display: flex;
             flex-direction: column;
+            align-items: center;
         }
         .form-group label {
             margin-bottom: 5px;
             font-weight: bold;
         }
-        .form-group input {
+        .form-group input, .form-group select {
             width: 200px;
             padding: 10px;
             border: 1px solid #ccc;
@@ -43,6 +44,7 @@
             margin-top: 10px;
         }
         button {
+            margin-top: 10px;
             padding: 10px 20px;
             border: none;
             background-color: #28a745;
@@ -171,6 +173,19 @@
             font-size: 0.8em;
             color: #888;
         }
+        .loading-bar {
+            width: 100%;
+            background-color: #f3f3f3;
+            margin: 20px 0;
+        }
+        .loading-bar-fill {
+            height: 30px;
+            width: 0;
+            background-color: #4caf50;
+            text-align: center;
+            line-height: 30px;
+            color: white;
+        }
     </style>
 </head>
 <body>
@@ -194,14 +209,18 @@
         </div>
         <div class="form-group">
             <label for="vendor">Fornitore:</label>
-            <input type="text" id="vendor">
-        </div>
-        <div class="form-group-row">
-            <button onclick="fetchStats()">Visualizza Statistiche</button>
+            <select id="vendor"></select>
         </div>
         <div class="form-group-row">
             <button onclick="fetchPriceChanges()">Visualizza Cambiamenti di Prezzo</button>
         </div>
+        <div class="form-group-row">
+            <button style="background-color: #dc3545;" onclick="forcePriceUpdate()">Forza Aggiornamento Prezzi</button>
+        </div>
+    </div>
+
+    <div class="loading-bar" id="loadingBar" style="display: none;">
+        <div class="loading-bar-fill" id="loadingBarFill">0%</div>
     </div>
 
     <div id="stats" class="stats"></div>
@@ -209,6 +228,7 @@
     <div id="priceChangesSidebar" class="price-changes-sidebar">
         <a href="javascript:void(0)" class="closebtn" onclick="closePriceChanges()">&times;</a>
         <h2>Cambiamenti di prezzo per <span id="vendorName"></span></h2>
+        <div id="priceChangesHeader"></div>
         <div id="priceChangesContent"></div>
     </div>
 
@@ -229,35 +249,15 @@
             document.getElementById("priceChangesSidebar").style.width = "0";
         }
 
-        function fetchStats() {
-            const fromDate = document.getElementById('fromDate').value;
-            const toDate = document.getElementById('toDate').value;
-            let url = `/get-price-update-stats`;
-            if (fromDate || toDate) {
-                url += `?from_date=${fromDate}&to_date=${toDate}`;
-            }
-            fetch(url)
+        function fetchVendors() {
+            fetch('/get-vendors')
             .then(response => response.json())
             .then(data => {
-                const statsDiv = document.getElementById('stats');
-                statsDiv.innerHTML = `
-                    <h2>Statistiche</h2>
-                    <p>Totale aggiornamenti: ${data.total_updates}</p>
-                    <p>Prezzi variati: ${data.varied}</p>
-                    <p>Prezzi invariati: ${data.unchanged}</p>
-                `;
-
-                let vendorStatsHtml = `<div class="vendor-stats"><h3>Statistiche per Fornitore</h3><ul>`;
-                for (const vendor in data.vendors) {
-                    vendorStatsHtml += `
-                        <li><strong>${vendor}</strong> - Variati: ${data.vendors[vendor].varied}, Invariati: ${data.vendors[vendor].unchanged}</li>
-                    `;
-                }
-                vendorStatsHtml += `</ul></div>`;
-                statsDiv.innerHTML += vendorStatsHtml;
+                const vendorSelect = document.getElementById('vendor');
+                vendorSelect.innerHTML = data.vendors.map(vendor => `<option value="${vendor}">${vendor}</option>`).join('');
             })
             .catch(error => {
-                alert('Errore nella richiesta: ' + error.message);
+                alert('Errore nella richiesta dei fornitori: ' + error.message);
             });
         }
 
@@ -276,8 +276,88 @@
             .then(response => response.json())
             .then(data => {
                 const priceChangesContent = document.getElementById('priceChangesContent');
+                const priceChangesHeader = document.getElementById('priceChangesHeader');
                 const vendorName = document.getElementById('vendorName');
                 vendorName.textContent = vendor;
+
+                const options = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' };
+                const fromDateFormatted = new Date(fromDate).toLocaleDateString('it-IT', options);
+                const toDateFormatted = new Date(toDate).toLocaleDateString('it-IT', options);
+
+                priceChangesHeader.innerHTML = `<p>${data.price_changes.length} risultati per il fornitore ${vendor} dal ${fromDateFormatted} al ${toDateFormatted}</p>`;
+                priceChangesContent.innerHTML = '';
+
+                if (data.price_changes.length === 0) {
+                    priceChangesContent.innerHTML = '<p>Nessun cambiamento di prezzo trovato.</p>';
+                } else {
+                    data.price_changes.forEach(change => {
+                        const oldPrice = parseFloat(change.old_price.replace(/[^0-9,]/g, '').replace(',', '.'));
+                        const newPrice = parseFloat(change.new_price.replace(/[^0-9,]/g, '').replace(',', '.'));
+                        if (oldPrice !== newPrice) {
+                            priceChangesContent.innerHTML += `
+                                <div class="price-change">
+                                    <p class="timestamp">Data: ${new Date(change.timestamp).toLocaleString('it-IT', options)}</p>
+                                    <p class="product-title">Prodotto: ${change.product_title}</p>
+                                    <p class="product-url">URL: <a href="${change.url}" target="_blank">${change.url}</a></p>
+                                    <p class="old-price">Vecchio Prezzo: €${change.old_price}</p>
+                                    <p class="new-price">Nuovo Prezzo: €${change.new_price}</p>
+                                </div>
+                            `;
+                        }
+                    });
+                }
+
+                openPriceChanges();
+            })
+            .catch(error => {
+                alert('Errore nella richiesta: ' + error.message);
+            });
+        }
+
+        function forcePriceUpdate() {
+            const secret = 'seceythatishardtoguessdrvsserzerfcc';  // Replace with your actual secret
+            const loadingBar = document.getElementById('loadingBar');
+            const loadingBarFill = document.getElementById('loadingBarFill');
+
+            loadingBar.style.display = 'block';
+            loadingBarFill.style.width = '0%';
+            loadingBarFill.textContent = '0%';
+
+            fetch('/update-prices', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ secret })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    const statsContainer = document.getElementById('stats');
+                    statsContainer.innerHTML = `
+                        <p>Prodotto aggiornati: ${data.stats.total_updates}</p>
+                        <p>Prodotti con prezzi invariati: ${data.stats.unchanged}</p>
+                        <p>Prodotti con prezzi variati: ${data.stats.varied} <button onclick="fetchUpdateResults()">Vedi prodotti</button></p>
+                    `;
+                } else {
+                    alert(`Errore nell'aggiornamento dei prezzi: ${data.message}`);
+                }
+                loadingBar.style.display = 'none';
+            })
+            .catch(error => {
+                alert('Errore nella richiesta di aggiornamento: ' + error.message);
+                loadingBar.style.display = 'none';
+            });
+        }
+
+        function fetchUpdateResults() {
+            fetch('/get-update-results')
+            .then(response => response.json())
+            .then(data => {
+                const priceChangesContent = document.getElementById('priceChangesContent');
+                const priceChangesHeader = document.getElementById('priceChangesHeader');
+
+                priceChangesHeader.innerHTML = `<p>Totale aggiornamenti: ${data.varied + data.unchanged}, Prezzi variati: ${data.varied}, Prezzi invariati: ${data.unchanged}</p>`;
                 priceChangesContent.innerHTML = '';
 
                 if (data.price_changes.length === 0) {
@@ -286,7 +366,7 @@
                     data.price_changes.forEach(change => {
                         priceChangesContent.innerHTML += `
                             <div class="price-change">
-                                <p class="timestamp">Data: ${new Date(change.timestamp).toUTCString()}</p>
+                                <p class="timestamp">Data: ${new Date(change.timestamp).toLocaleString('it-IT')}</p>
                                 <p class="product-title">Prodotto: ${change.product_title}</p>
                                 <p class="product-url">URL: <a href="${change.url}" target="_blank">${change.url}</a></p>
                                 <p class="old-price">Vecchio Prezzo: €${change.old_price}</p>
@@ -299,9 +379,11 @@
                 openPriceChanges();
             })
             .catch(error => {
-                alert('Errore nella richiesta: ' + error.message);
+                alert('Errore nella richiesta dei risultati: ' + error.message);
             });
         }
+
+        document.addEventListener('DOMContentLoaded', fetchVendors);
     </script>
 </body>
 </html>

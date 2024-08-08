@@ -47,6 +47,7 @@ class Competitor(db.Model):
     price_selector = db.Column(db.String(100), nullable=False)
     competitor_price = db.Column(db.String(50), nullable=False)
     shopify_product = db.Column(db.Text, nullable=False)
+    shopify_price = db.Column(db.String(50), nullable=True)  # Aggiungi questa colonna
 
     def __repr__(self):
         return f"<Competitor {self.url}>"
@@ -126,6 +127,17 @@ def delete_user(user_id):
 
 logging.basicConfig(level=logging.INFO)
 
+@app.route('/get-vendors', methods=['GET'])
+@login_required
+def get_vendors():
+    try:
+        vendors = db.session.query(Competitor.vendor).distinct().all()
+        vendor_list = [vendor[0] for vendor in vendors]
+        return jsonify({'vendors': vendor_list})
+    except Exception as e:
+        app.logger.error(f"Error in get_vendors: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @app.route('/')
 @login_required
 def index():
@@ -197,6 +209,7 @@ def add_competitor():
 
         # Get the product details from Shopify
         shopify_product = get_shopify_product(product_id)
+        shopify_price = shopify_product['variants'][0]['price']  # Ottieni il prezzo Shopify
 
         # Add the competitor to the database
         new_competitor = Competitor(
@@ -205,6 +218,7 @@ def add_competitor():
             vendor=vendor,
             price_selector=price_selector,
             competitor_price=competitor_price,
+            shopify_price=shopify_price,  # Aggiungi il prezzo Shopify
             shopify_product=json.dumps(shopify_product)
         )
         db.session.add(new_competitor)
@@ -227,6 +241,7 @@ def add_competitor():
             'vendor': new_competitor.vendor,
             'price_selector': new_competitor.price_selector,
             'competitor_price': new_competitor.competitor_price,
+            'shopify_price': new_competitor.shopify_price,  # Includi il prezzo Shopify nei dati di risposta
             'shopify_product': json.loads(new_competitor.shopify_product)
         }})
     except Exception as e:
@@ -266,6 +281,7 @@ def get_competitors():
             'vendor': c.vendor,
             'price_selector': c.price_selector,
             'competitor_price': c.competitor_price,
+            'shopify_price': c.shopify_price,  # Includi il prezzo Shopify nei dati
             'shopify_product': json.loads(c.shopify_product)
         } for c in competitors]
 
@@ -303,9 +319,64 @@ def update_prices():
         abort(401)
     try:
         update_competitor_prices()
-        return jsonify({'status': 'success', 'message': 'Prices updated successfully'})
+        update_shopify_prices()  # Aggiungi l'aggiornamento dei prezzi Shopify
+        stats = get_price_update_stats_summary()  # Funzione per ottenere il riepilogo delle statistiche
+        return jsonify({'status': 'success', 'message': 'Prices updated successfully', 'stats': stats})
     except Exception as e:
         app.logger.error(f"Error in update_prices: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+def get_price_update_stats_summary():
+    logs = PriceUpdateLog.query.all()
+    varied = len([log for log in logs if log.status == "varied"])
+    unchanged = len([log for log in logs if log.status == "unchanged"])
+    return {
+        "total_updates": len(logs),
+        "varied": varied,
+        "unchanged": unchanged
+    }
+    
+@app.route('/get-update-results', methods=['GET'])
+@login_required
+def get_update_results():
+    try:
+        logs = PriceUpdateLog.query.order_by(PriceUpdateLog.timestamp.desc()).limit(100).all()
+        results = {
+            "varied": 0,
+            "unchanged": 0,
+            "vendors": {},
+            "price_changes": []
+        }
+
+        for log in logs:
+            if log.status == "varied":
+                results["varied"] += 1
+            else:
+                results["unchanged"] += 1
+
+            if log.vendor not in results["vendors"]:
+                results["vendors"][log.vendor] = {
+                    "varied": 0,
+                    "unchanged": 0
+                }
+            results["vendors"][log.vendor][log.status] += 1
+
+            competitor = Competitor.query.filter_by(product_id=log.product_id).first()
+            if competitor:
+                results["price_changes"].append({
+                    "timestamp": log.timestamp,
+                    "product_id": log.product_id,
+                    "old_price": log.old_price,
+                    "new_price": log.new_price,
+                    "vendor": log.vendor,
+                    "status": log.status,
+                    "url": competitor.url,
+                    "product_title": json.loads(competitor.shopify_product)["title"]
+                })
+
+        return jsonify(results)
+    except Exception as e:
+        app.logger.error(f"Error in get_update_results: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/get-shopify-products', methods=['GET'])
@@ -345,7 +416,7 @@ def get_shopify_products():
     except Exception as e:
         app.logger.error(f"Error in get_shopify_products: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-
+    
 @app.route('/get-shopify-vendors', methods=['GET'])
 @login_required
 def get_shopify_vendors():
@@ -390,6 +461,7 @@ def get_shopify_vendors():
 def search_competitor_product():
     try:
         query = request.args.get('query')
+        vendor = request.args.get('vendor')  # Aggiungi questa linea per ottenere il parametro vendor
         competitors = Competitor.query.all()
         results = []
         
@@ -399,15 +471,20 @@ def search_competitor_product():
                 any(query.lower() in variant['sku'].lower() for variant in shopify_product['variants']) or 
                 any(query.lower() in variant['barcode'].lower() for variant in shopify_product['variants'])):
                 
+                if vendor and shopify_product['vendor'] != vendor:
+                    continue  # Skip the product if the vendor does not match the filter
+                
                 competitor_data = {
+                    'id': competitor.id,  # Aggiungi l'ID del competitor per la funzionalità di eliminazione
                     'url': competitor.url,
                     'product_title': shopify_product['title'],
+                    'product_handle': shopify_product['handle'],
                     'competitor_price': competitor.competitor_price,
-                    'shopify_price': shopify_product['variants'][0]['price'],
+                    'shopify_price': competitor.shopify_price,
                     'vendor': shopify_product['vendor'],
                 }
                 
-                shopify_price = float(shopify_product['variants'][0]['price'].replace(',', '.'))
+                shopify_price = float(competitor.shopify_price.replace(',', '.'))
                 competitor_price = float(competitor.competitor_price.replace('.', '').replace(',', '.'))
                 if shopify_price < competitor_price:
                     percentage = ((competitor_price - shopify_price) / competitor_price * 100)
@@ -427,6 +504,12 @@ def search_competitor_product():
     except Exception as e:
         app.logger.error(f"Error in search_competitor_product: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    
+@app.route('/update-shopify-prices-manually', methods=['GET'])
+def update_shopify_prices_manually():
+    update_shopify_prices()
+    return "Shopify prices updated manually", 200
 
 @app.route('/get-price-update-stats', methods=['GET'])
 @login_required
@@ -505,6 +588,21 @@ def get_price_change_report():
         return jsonify({'price_changes': price_changes})
     except Exception as e:
         app.logger.error(f"Error in get_price_change_report: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    
+@app.route('/get-product-vendor', methods=['GET'])
+@login_required
+def get_product_vendor():
+    try:
+        product_id = request.args.get('product_id')
+        shopify_product = get_shopify_product(product_id)
+        if shopify_product:
+            vendor = shopify_product.get('vendor', 'Vendor not found')
+            return jsonify({'status': 'success', 'vendor': vendor})
+        else:
+            return jsonify({'status': 'error', 'message': 'Product not found'}), 404
+    except Exception as e:
+        app.logger.error(f"Error in get_product_vendor: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 def scrape_price(url, price_selector):
@@ -613,6 +711,21 @@ def update_competitor_prices():
     except Exception as e:
         app.logger.error(f"Error in update_competitor_prices: {e}")
 
+def update_shopify_prices():
+    try:
+        app.logger.info(f"Updating Shopify prices at {datetime.now()}")
+        competitors = Competitor.query.all()
+        for competitor in competitors:
+            shopify_product = get_shopify_product(competitor.product_id)
+            if shopify_product and 'variants' in shopify_product and len(shopify_product['variants']) > 0:
+                new_shopify_price = shopify_product['variants'][0]['price']
+                if new_shopify_price != competitor.shopify_price:
+                    competitor.shopify_price = new_shopify_price
+                    db.session.commit()
+                    app.logger.info(f"Updated Shopify price for {competitor.url} to {new_shopify_price}")
+    except Exception as e:
+        app.logger.error(f"Error in update_shopify_prices: {e}")
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
@@ -630,6 +743,7 @@ if __name__ == '__main__':
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(func=update_competitor_prices, trigger="interval", hours=24)
+    scheduler.add_job(func=update_shopify_prices, trigger="interval", hours=24)
     scheduler.start()
 
     try:

@@ -154,7 +154,7 @@
             </div>
             <div class="form-group">
                 <label for="vendor">Vendor:</label>
-                <select id="vendor" name="vendor"></select>
+                <input type="text" id="vendor" name="vendor" readonly>
             </div>
             <div class="form-group">
                 <label for="product_id">Prodotto Shopify:</label>
@@ -189,6 +189,7 @@
             let competitors = [];
             let currentPage = 1;
             const perPage = 10;
+            const shopifyStoreUrl = "https://www.idea-giardino.com";
 
             fetch('/get-shopify-products')
             .then(response => response.json())
@@ -226,6 +227,27 @@
                     option.textContent = vendor;
                     vendorSelect.appendChild(option);
                 });
+            });
+
+            // Aggiungi qui il nuovo event listener
+            document.getElementById('product_id').addEventListener('change', function() {
+               const selectedProductId = this.value;
+               const selectedProductOption = this.options[this.selectedIndex];
+
+               if (selectedProductId) {
+                  fetch(`/get-product-vendor?product_id=${selectedProductId}`)
+                 .then(response => response.json())
+                 .then(data => {
+                    if (data.status === 'success') {
+                       document.getElementById('vendor').value = data.vendor;
+                    } else {
+                       console.log('Vendor not found for the selected product.');
+                    }
+                })
+                .catch(error => {
+                   console.error('Error fetching vendor:', error);
+                });
+              }
             });
 
             document.getElementById('vendor').addEventListener('change', function() {
@@ -362,8 +384,8 @@
                     competitorItem.className = 'competitor-item';
                     competitorItem.innerHTML = `
                         <div>
-                            <p><strong>URL Concorrente:</strong> ${competitor.url}</p>
-                            <p><strong>Prodotto Shopify:</strong> ${shopifyProduct.title}</p>
+                            <p><strong>URL Concorrente:</strong> <a href="${competitor.url}" target="_blank">${competitor.url}</a></p>
+                            <p><strong>Prodotto Shopify:</strong> <a href="${shopifyStoreUrl}/products/${shopifyProduct.handle}" target="_blank">${shopifyProduct.title}</a></p>
                             <p><strong>Prezzo Concorrente:</strong> ${competitor.competitor_price}</p>
                             <p><strong>Prezzo Shopify:</strong> ${shopifyProduct.variants[0].price}</p>
                             <p><strong>Fornitore:</strong> ${shopifyProduct.vendor}</p>
@@ -415,6 +437,7 @@
 
             loadCompetitors(currentPage);  // Load competitors for the first page initially
         });
+
     </script>
 </body>
 </html>
