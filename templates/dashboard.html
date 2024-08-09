@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+        }
+        h1, h2 {
+            text-align: center;
+            color: #333;
+        }
+        .dashboard-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            max-width: 800px;
+            margin: auto;
+        }
+        .data-summary {
+            text-align: left;
+            width: 100%;
+        }
+        .data-summary h3 {
+            margin-top: 0;
+            color: #007bff;
+        }
+        .form-container {
+            margin: 20px 0;
+            text-align: center;
+        }
+        .form-group {
+            display: inline-block;
+            margin: 10px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+        }
+        .form-group input {
+            padding: 8px;
+            width: 150px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            background-color: #28a745;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #218838;
+        }
+        .results-container {
+            margin-top: 20px;
+            text-align: left;
+            width: 100%;
+        }
+        .results-container h3 {
+            color: #333;
+        }
+        .results-container p {
+            margin: 5px 0;
+            color: #555;
+        }
+        .results-container ul {
+            list-style: none;
+            padding: 0;
+        }
+        .results-container ul li {
+            background-color: #f9f9f9;
+            margin: 5px 0;
+            padding: 10px;
+            border-radius: 4px;
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
+        }
+        /* Stile per il menu laterale */
+        .menu-icon {
+            font-size: 30px;
+            cursor: pointer;
+        }
+        .sidebar {
+            height: 100%;
+            width: 0;
+            position: fixed;
+            z-index: 1;
+            top: 0;
+            left: 0;
+            background-color: #111;
+            overflow-x: hidden;
+            transition: 0.5s;
+            padding-top: 60px;
+        }
+        .sidebar a {
+            padding: 10px 15px;
+            text-decoration: none;
+            font-size: 18px;
+            color: white;
+            display: block;
+            transition: 0.3s;
+        }
+        .sidebar a:hover {
+            background-color: #575757;
+        }
+        .sidebar .closebtn {
+            position: absolute;
+            top: 0;
+            right: 5px;
+            font-size: 36px;
+            margin-left: 50px;
+            margin-bottom: 30px;
+        }
+        /* Stili per il popup */
+        #popupOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+        }
+        #popupContent {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            width: 80%;
+            max-width: 1000px;
+            height: 80%;
+            overflow-y: auto;
+            position: relative;
+        }
+        #closePopup {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 24px;
+            cursor: pointer;
+            color: #333;
+        }
+        #popupTitle {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: #333;
+        }
+        #searchInput {
+            width: 90%;
+            padding: 10px;
+            margin-bottom: 20px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        #searchResults {
+            list-style: none;
+            padding: 0;
+        }
+        #searchResults li {
+            padding: 10px;
+            border-bottom: 1px solid #ccc;
+        }
+        #shopify-products-link {
+            cursor: pointer;
+            color: #007bff;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <!-- Menu laterale -->
+    <div id="menu" class="menu-icon" onclick="openNav()">&#9776;</div>
+    <div id="mySidebar" class="sidebar">
+        <a href="javascript:void(0)" class="closebtn" onclick="closeNav()">&times;</a>
+        <a href="/">Monitoraggio Concorrenza</a>
+        <a href="/search-competitor">Ricerca per concorrente</a>
+        <a href="/price-update-stats">Statistiche aggiornamento prezzi</a>
+        <a href="/dashboard">Dashboard</a>
+    </div>
+
+    <div class="dashboard-container">
+        <h1>Dashboard</h1>
+
+        <div class="data-summary">
+            <h3 id="total-shopify-products">Totale Prodotti Shopify: Caricamento...</h3>
+            <h3>Totale Prodotti Integrati dei Concorrenti: {{ total_competitor_products }}</h3>
+            
+            <h3>Dettaglio per Fornitore:</h3>
+            <ul>
+                {% for supplier, count in suppliers %}
+                    <li><strong>{{ supplier }}:</strong> {{ count }} prodotti</li>
+                {% endfor %}
+            </ul>
+        </div>
+
+        <div class="form-container">
+            <form method="POST">
+                <div class="form-group">
+                    <label for="from_date">Data Inizio:</label>
+                    <input type="date" id="from_date" name="from_date" required>
+                </div>
+                <div class="form-group">
+                    <label for="to_date">Data Fine:</label>
+                    <input type="date" id="to_date" name="to_date" required>
+                </div>
+                <button type="submit">Avvia Ricerca</button>
+            </form>
+        </div>
+
+        {% if results %}
+        <div class="results-container">
+            <h3>Risultati dal {{ results.from_date }} al {{ results.to_date }}:</h3>
+            <p>Totale Prodotti Integrati: {{ results.total_products_in_range }}</p>
+            
+            <h3>Dettaglio per Fornitore:</h3>
+            <ul>
+                {% for supplier, count in results.suppliers_in_range %}
+                    <li><strong>{{ supplier }}:</strong> {{ count }} prodotti</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Popup per la ricerca prodotti Shopify -->
+    <div id="popupOverlay">
+        <div id="popupContent">
+            <span id="closePopup">&times;</span>
+            <div id="popupTitle">Cerca Prodotti Shopify</div>
+            <input type="text" id="searchInput" placeholder="Cerca prodotti per ID, EAN, SKU, titolo, fornitore...">
+            <ul id="searchResults"></ul>
+        </div>
+    </div>
+
+    <script>
+        function openNav() {
+            document.getElementById("mySidebar").style.width = "250px";
+        }
+
+        function closeNav() {
+            document.getElementById("mySidebar").style.width = "0";
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            fetch('/get-shopify-products')
+            .then(response => response.json())
+            .then(data => {
+                const shopifyProductsLink = document.createElement('a');
+                shopifyProductsLink.id = 'shopify-products-link';
+                shopifyProductsLink.href = 'javascript:void(0)';
+                shopifyProductsLink.textContent = data.total;
+                shopifyProductsLink.onclick = function() {
+                    document.getElementById('popupOverlay').style.display = 'flex';
+                };
+                document.getElementById('total-shopify-products').innerHTML = 'Totale Prodotti Shopify: ';
+                document.getElementById('total-shopify-products').appendChild(shopifyProductsLink);
+            })
+            .catch(error => {
+                console.error('Errore nel recupero del numero totale di prodotti Shopify:', error);
+            });
+
+            document.getElementById('closePopup').onclick = function() {
+                document.getElementById('popupOverlay').style.display = 'none';
+            };
+
+            document.getElementById('searchInput').addEventListener('input', function() {
+                const query = this.value.toLowerCase();
+
+                fetch('/get-shopify-products')
+                .then(response => response.json())
+                .then(data => {
+                    const results = data.products.filter(product => {
+                        return product.title.toLowerCase().includes(query) || 
+                               product.variants.some(variant => 
+                                   variant.sku.toLowerCase().includes(query) || 
+                                   variant.barcode && variant.barcode.toLowerCase().includes(query));
+                    });
+
+                    const searchResults = document.getElementById('searchResults');
+                    searchResults.innerHTML = '';
+                    results.forEach(product => {
+                        const li = document.createElement('li');
+                        li.textContent = `${product.title} (SKU: ${product.variants[0].sku})`;
+                        searchResults.appendChild(li);
+                    });
+                })
+                .catch(error => {
+                    console.error('Errore nella ricerca dei prodotti Shopify:', error);
+                });
+            });
+        });
+    </script>
+</body>
+</html>

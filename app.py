@@ -11,7 +11,7 @@ import logging
 import re
 import os
 from apscheduler.schedulers.background import BackgroundScheduler
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import json
 from urllib.parse import urlparse
@@ -48,6 +48,7 @@ class Competitor(db.Model):
     competitor_price = db.Column(db.String(50), nullable=False)
     shopify_product = db.Column(db.Text, nullable=False)
     shopify_price = db.Column(db.String(50), nullable=True)  # Aggiungi questa colonna
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
         return f"<Competitor {self.url}>"
@@ -298,6 +299,53 @@ def get_competitors():
     except Exception as e:
         app.logger.error(f"Error in get_competitors: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+    
+@app.route('/dashboard', methods=['GET', 'POST'])
+@login_required
+def dashboard():
+    # Numero totale di prodotti integrati dei concorrenti
+    total_competitor_products = db.session.query(Competitor).count()
+
+    # Dettaglio per fornitore per l'intero database (solo se necessario mostrarlo)
+    suppliers = db.session.query(Competitor.vendor, db.func.count(Competitor.id)).group_by(Competitor.vendor).all()
+
+    results = {}
+    if request.method == 'POST':
+        from_date = request.form.get('from_date')
+        to_date = request.form.get('to_date')
+
+        # Converti le date in oggetti datetime e aggiungi la parte di tempo
+        from_date = datetime.strptime(from_date, '%Y-%m-%d')
+        to_date = datetime.strptime(to_date, '%Y-%m-%d') + timedelta(days=1)  # Aggiungi un giorno per includere l'intera giornata finale
+
+        # Filtra i prodotti per data
+        products_in_range = Competitor.query.filter(
+            Competitor.timestamp.between(from_date, to_date)
+        ).all()
+
+        # Conta il totale dei prodotti nel range
+        total_products_in_range = len(products_in_range)
+
+        # Conta i prodotti per fornitore nel range
+        suppliers_in_range = db.session.query(
+            Competitor.vendor, db.func.count(Competitor.id)
+        ).filter(
+            Competitor.timestamp.between(from_date, to_date)
+        ).group_by(Competitor.vendor).all()
+
+        results = {
+            'total_products_in_range': total_products_in_range,
+            'suppliers_in_range': suppliers_in_range,
+            'from_date': from_date.strftime('%Y-%m-%d'),
+            'to_date': to_date.strftime('%Y-%m-%d')
+        }
+
+    return render_template(
+        'dashboard.html',
+        total_competitor_products=total_competitor_products,
+        suppliers=suppliers,
+        results=results
+    )
 
 @app.route('/scrape-price', methods=['POST'])
 @login_required
