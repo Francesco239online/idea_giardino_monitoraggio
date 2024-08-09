@@ -7,6 +7,7 @@ from wtforms.validators import InputRequired, Length
 from werkzeug.security import generate_password_hash, check_password_hash
 import requests
 import pandas as pd
+from flask_migrate import Migrate
 from io import BytesIO
 from flask import send_file
 from bs4 import BeautifulSoup
@@ -41,6 +42,7 @@ update_secret = os.getenv('UPDATE_SECRET')
 
 # Inizializza l'estensione di Flask
 db = SQLAlchemy(app)
+migrate = Migrate(app, db)
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
