@@ -6,6 +6,9 @@ from wtforms import StringField, PasswordField, BooleanField
 from wtforms.validators import InputRequired, Length
 from werkzeug.security import generate_password_hash, check_password_hash
 import requests
+import pandas as pd
+from io import BytesIO
+from flask import send_file
 from bs4 import BeautifulSoup
 import logging
 import re
@@ -15,6 +18,14 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import json
 from urllib.parse import urlparse
+
+# Funzione per estrarre il nome del fornitore dal dominio
+def get_vendor_name(url):
+    parsed_url = urlparse(url)
+    domain_parts = parsed_url.netloc.split('.')
+    
+    # Ritorna il secondo elemento se esiste, altrimenti ritorna il primo
+    return domain_parts[-2] if len(domain_parts) > 1 else domain_parts[0]
 
 app = Flask(__name__)
 
@@ -263,6 +274,49 @@ def delete_competitor():
     except Exception as e:
         app.logger.error(f"Error in delete_competitor: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+    
+@app.route('/export', methods=['GET'])
+@login_required
+def export_data():
+    competitors = Competitor.query.all()
+    
+    data = []
+    for competitor in competitors:
+        shopify_product = json.loads(competitor.shopify_product)
+        shopify_price = float(competitor.shopify_price.replace(',', '.'))
+        competitor_price = float(competitor.competitor_price.replace(',', '.'))
+        
+        # Calcola il profitto
+        profit_percentage = round(((shopify_price - competitor_price) / competitor_price) * 100, 2)
+        
+        # Estrai la radice del dominio usando la funzione get_vendor_name
+        vendor_name = get_vendor_name(competitor.url)
+        
+        # Aggiungi i dati alla lista
+        data.append([
+            shopify_product['variants'][0]['sku'],
+            shopify_price,
+            vendor_name,  # Utilizza il nome del fornitore estratto
+            competitor_price,
+            f"{profit_percentage:.2f}%"
+        ])
+    
+    # Converti i dati in un DataFrame
+    df = pd.DataFrame(data, columns=[
+        'SKU Prodotto Shopify', 
+        'Prezzo Prodotto Shopify', 
+        'Concorrente', 
+        'Prezzo Concorrente', 
+        'Profitto (%)'
+    ])
+    
+    # Salva i dati in un file Excel in memoria
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False)
+    output.seek(0)
+    
+    return send_file(output, as_attachment=True, download_name="concorrenza_export.xlsx", mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 @app.route('/get-competitors', methods=['GET'])
 @login_required
